@@ -87,6 +87,7 @@ language plpgsql immutable as $$
 declare
   tent  jsonb;
   conq  jsonb;
+  bonus jsonb;
   fases jsonb := '{}'::jsonb;
   fa    jsonb;
   fb    jsonb;
@@ -115,6 +116,18 @@ begin
     select jsonb_array_elements_text(case when jsonb_typeof(novo->'conquistas') = 'array' then novo->'conquistas' else '[]'::jsonb end)
   ) as c(v);
 
+  -- XP bônus dado pela professora: junta os dois lados sem repetir (um aparelho antigo não apaga o bônus).
+  select coalesce(jsonb_agg(y.b order by y.b->>'data'), '[]'::jsonb) into bonus
+  from (
+    select distinct on (x.b->>'data', x.b->>'pontos') x.b
+    from (
+      select jsonb_array_elements(case when jsonb_typeof(antigo->'bonusXp') = 'array' then antigo->'bonusXp' else '[]'::jsonb end)
+      union all
+      select jsonb_array_elements(case when jsonb_typeof(novo->'bonusXp') = 'array' then novo->'bonusXp' else '[]'::jsonb end)
+    ) as x(b)
+    order by x.b->>'data', x.b->>'pontos'
+  ) as y;
+
   fa := case when jsonb_typeof(antigo->'fases') = 'object' then antigo->'fases' else '{}'::jsonb end;
   fb := case when jsonb_typeof(novo->'fases')   = 'object' then novo->'fases'   else '{}'::jsonb end;
   for k in select jsonb_object_keys(fa) union select jsonb_object_keys(fb) loop
@@ -136,6 +149,7 @@ begin
   return antigo || novo || jsonb_build_object(
     'tentativas', tent,
     'conquistas', conq,
+    'bonusXp', bonus,
     'fases', fases,
     'maiorSequencia', greatest(coalesce((antigo->>'maiorSequencia')::numeric, 0), coalesce((novo->>'maiorSequencia')::numeric, 0)));
 end $$;
@@ -339,6 +353,7 @@ begin
       'conquistas', case when jsonb_typeof(a.dados->'conquistas') = 'array' then a.dados->'conquistas' else '[]'::jsonb end,
       'fases', case when jsonb_typeof(a.dados->'fases') = 'object' then a.dados->'fases' else '{}'::jsonb end,
       'maiorSequencia', coalesce(a.dados->'maiorSequencia', '0'::jsonb),
+      'bonusXp', case when jsonb_typeof(a.dados->'bonusXp') = 'array' then a.dados->'bonusXp' else '[]'::jsonb end,
       'tentativas', coalesce((
         select jsonb_agg(jsonb_build_object('faseId', t->>'faseId', 'data', t->>'data', 'pontos', t->'pontos'))
         from jsonb_array_elements(case when jsonb_typeof(a.dados->'tentativas') = 'array' then a.dados->'tentativas' else '[]'::jsonb end) t
@@ -469,3 +484,6 @@ grant execute on function
   public.professor_alterar_pin(text, text), public.professor_apagar_tudo(text), public.professor_importar(text, jsonb),
   public.professor_redefinir_senha(text, uuid, text), public.professor_apagar_aluno(text, uuid)
 to anon, authenticated;
+
+-- Remove a função de dar XP pelo painel, caso tenha sido criada antes.
+drop function if exists public.professor_dar_xp(text, uuid, int);

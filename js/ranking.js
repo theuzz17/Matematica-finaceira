@@ -29,12 +29,16 @@ function somarDias(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); re
 const chaveSemana = d => chaveDia(inicioSemana(d));
 
 /* ---------------- XP, OFENSIVA E NÍVEL ---------------- */
-// XP = soma dos pontos de TODAS as tentativas (repetir fase também vale, como no Duolingo).
-const xpTotal = a => a.tentativas.reduce((s, t) => s + (t.pontos || 0), 0);
+// XP = soma dos pontos de TODAS as tentativas (repetir fase também vale, como no Duolingo)
+// mais o XP bônus dado pela professora (que não é partida e não conta como dia de ofensiva).
+const bonusDe = a => (Array.isArray(a.bonusXp) ? a.bonusXp : []).filter(b => b && Number.isFinite(+b.pontos) && b.data);
+const ganhosXP = a => [...a.tentativas.map(t => ({ data: t.data, pontos: t.pontos || 0 })), ...bonusDe(a).map(b => ({ data: b.data, pontos: +b.pontos }))];
+const xpBonus = a => bonusDe(a).reduce((s, b) => s + +b.pontos, 0);
+const xpTotal = a => ganhosXP(a).reduce((s, g) => s + g.pontos, 0);
 
 function xpPorSemana(a) {
   const m = {};
-  a.tentativas.forEach(t => { const k = chaveSemana(new Date(t.data)); m[k] = (m[k] || 0) + (t.pontos || 0); });
+  ganhosXP(a).forEach(g => { const k = chaveSemana(new Date(g.data)); m[k] = (m[k] || 0) + g.pontos; });
   return m;
 }
 const xpDaSemana = (a, semana = chaveSemana(new Date())) => xpPorSemana(a)[semana] || 0;
@@ -42,7 +46,7 @@ const xpDaSemana = (a, semana = chaveSemana(new Date())) => xpPorSemana(a)[seman
 function xpPorDia(a, inicio) {
   const dias = DIAS_CURTOS.map((_, i) => chaveDia(somarDias(inicio, i)));
   const v = dias.map(() => 0);
-  a.tentativas.forEach(t => { const k = dias.indexOf(chaveDia(new Date(t.data))); if (k >= 0) v[k] += t.pontos || 0; });
+  ganhosXP(a).forEach(g => { const k = dias.indexOf(chaveDia(new Date(g.data))); if (k >= 0) v[k] += g.pontos; });
   return v;
 }
 
@@ -106,7 +110,7 @@ let cacheLigas = null;
 function calcularLigas() {
   const alunos = alunosRanking();
   const atual = chaveSemana(new Date());
-  const assinatura = `${atual}|${rankingVersao}|${alunos.length}|${alunos.reduce((s, a) => s + a.tentativas.length, 0)}`;
+  const assinatura = `${atual}|${rankingVersao}|${alunos.length}|${alunos.reduce((s, a) => s + a.tentativas.length + bonusDe(a).length, 0)}`;
   if (cacheLigas?.assinatura === assinatura) return cacheLigas;
 
   const liga = {}, resultado = {}, xps = {}, inicios = {};
