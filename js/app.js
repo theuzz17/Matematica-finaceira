@@ -53,10 +53,19 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const normalizar = s => s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
 
-function salvarAluno() { dados.alunos[aluno.id] = aluno; Store.salvar(dados); }
+function salvarAluno() { dados.alunos[aluno.id] = aluno; Store.salvar(dados); Sync.agendar(); }
 
+const TELAS_NAV = { 'tela-trilha': 'trilha', 'tela-ranking': 'ranking', 'tela-perfil': 'perfil' };
 function mostrar(tela) {
   document.querySelectorAll('.tela').forEach(t => t.classList.toggle('ativa', t.id === tela));
+  const aba = TELAS_NAV[tela], nav = $('#nav-inferior');
+  nav.hidden = !aba;
+  document.body.classList.toggle('com-nav', !!aba);
+  nav.querySelectorAll('[data-ir]').forEach(b => {
+    const on = b.dataset.ir === aba;
+    b.classList.toggle('ativa', on);
+    on ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current');
+  });
   window.scrollTo(0, 0);
 }
 function abrirModal(html) { $('#modal-conteudo').innerHTML = html; $('#modal').classList.add('aberto'); }
@@ -79,24 +88,42 @@ const faseLiberada = i => i === 0 || !!aluno.fases[FASES[i].id] || (aluno.fases[
 
 /* ---------------- LOGIN ---------------- */
 function iniciarLogin() {
-  $('#form-login').onsubmit = e => {
+  $('#form-login').onsubmit = async e => {
     e.preventDefault();
-    const nome = $('#login-nome').value.trim();
-    const turma = $('#login-turma').value.trim();
+    const nome = $('#login-nome').value.trim().replace(/\s+/g, ' ');
+    const turma = $('#login-turma').value.trim().replace(/\s+/g, ' ');
     const pin = $('#login-pin').value.trim();
     const erro = $('#login-erro');
     if (nome.length < 2 || !turma || !/^\d{4}$/.test(pin)) { erro.textContent = 'Preencha nome, turma e uma senha de 4 números.'; return; }
-    const id = normalizar(turma) + '|' + normalizar(nome);
-    const existente = dados.alunos[id];
+
+    // Com banco de dados: entra pelo banco. Sem internet, cai no modo do aparelho.
+    if (Banco.ativo) {
+      const botao = $('#form-login button[type=submit]'), texto = botao.textContent;
+      botao.disabled = true; botao.textContent = 'Entrando...'; erro.textContent = '';
+      try {
+        await entrarOnline(nome, turma, pin);
+        personagemDe(aluno.personagem) ? abrirTrilha() : abrirPersonagens();
+        return;
+      } catch (falha) {
+        if (falha.codigo !== 'SEM_CONEXAO' && falha.codigo !== 'SERVIDOR') { erro.textContent = mensagemErro(falha); return; }
+        toast('📴 Sem conexão com o banco. Entrando no modo do aparelho: seu progresso será enviado depois.');
+      } finally { botao.disabled = false; botao.textContent = texto; }
+    }
+
+    // Procura pelo nome atual (o estudante pode ter trocado o nome no perfil).
+    const chave = normalizar(turma) + '|' + normalizar(nome);
+    const existente = Object.values(dados.alunos).find(a => normalizar(a.turma) + '|' + normalizar(a.nome) === chave);
     if (existente) {
       if (existente.pin !== pin) { erro.textContent = 'Senha incorreta para este nome e turma.'; return; }
       aluno = existente;
     } else {
-      aluno = { id, nome, turma, pin, personagem: null, criadoEm: new Date().toISOString(), fases: {}, tentativas: [], conquistas: [], meta: null, maiorSequencia: 0 };
+      let id = chave, n = 2;
+      while (dados.alunos[id]) id = `${chave}#${n++}`;
+      aluno = { id, nome, turma, pin, personagem: null, criadoEm: new Date().toISOString(), fases: {}, tentativas: [], conquistas: [], meta: null, maiorSequencia: 0, perfil: {} };
       salvarAluno();
     }
     erro.textContent = '';
-    Store.sessao(id);
+    Store.sessao(aluno.id);
     personagemDe(aluno.personagem) ? abrirTrilha() : abrirPersonagens();
   };
   $('#btn-professor').onclick = () => abrirLoginProfessor();
@@ -122,12 +149,18 @@ function abrirPersonagens() {
 function abrirTrilha() {
   const p = personagem();
   $('#topo-avatar').innerHTML = avatarSVG(p, 'topo');
-  $('#topo-nome').textContent = aluno.nome.split(' ')[0];
+  $('#topo-avatar').style.setProperty('--moldura', molduraDe(aluno));
+  $('#topo-nome').textContent = nomePublico(aluno).split(' ')[0];
   $('#topo-pontos').textContent = totalPontos(aluno);
   $('#topo-estrelas').textContent = totalEstrelas(aluno);
+  const of = ofensiva(aluno);
+  $('#topo-ofensiva').textContent = of.dias;
+  $('#topo-ofensiva-wrap').classList.toggle('acesa', of.hoje);
+  $('#topo-ofensiva-wrap').title = of.hoje ? `Ofensiva de ${of.dias} dia(s)! Você já jogou hoje.` : 'Ofensiva: jogue uma fase hoje para manter o fogo aceso.';
   desenharTrilha();
   desenharMetaResumo();
   mostrar('tela-trilha');
+  verificarResultadoLiga();
   const atual = document.querySelector('.no.atual');
   if (atual) setTimeout(() => atual.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
 }
@@ -302,6 +335,7 @@ function finalizarQuiz() {
 
   const proxima = FASES[i + 1];
   const p = personagem();
+  const nivelLiga = ligaDe(aluno);
   $('#resultado-conteudo').innerHTML = `
     <div class="res-personagem ${estrelas ? 'pula' : ''}">${avatarSVG(p, 'resultado')}</div>
     <h2>${estrelas === 3 ? 'Perfeito!' : estrelas > 0 ? 'Fase concluída!' : 'Quase lá!'}</h2>
@@ -311,6 +345,7 @@ function finalizarQuiz() {
       <div><b>${pontos}</b><small>pontos</small></div>
       <div><b>${quiz.maiorSeq}</b><small>maior sequência</small></div>
     </div>
+    <button class="res-liga" id="res-liga">${escudoLiga(nivelLiga)}<span><b>+${pontos} XP</b> · ${posicaoNaLiga(aluno)}º lugar na Liga ${LIGAS[nivelLiga].nome}</span></button>
     ${recorde && anterior.tentativas > 0 ? '<p class="recorde">🎉 Novo recorde nesta fase!</p>' : ''}
     ${estrelas === 0 ? `<p>Você precisa de ${total - 2} acertos para avançar. As questões serão novas na próxima tentativa!</p>` : ''}
     ${msgMeta}
@@ -327,6 +362,7 @@ function finalizarQuiz() {
   if (estrelas > 0) confete();
   $('#res-repetir').onclick = () => iniciarQuiz(i);
   $('#res-trilha').onclick = () => abrirTrilha();
+  $('#res-liga').onclick = () => { abaRanking = 'liga'; abrirRanking(); };
   if ($('#res-proxima')) $('#res-proxima').onclick = () => { abrirTrilha(); setTimeout(() => abrirDetalheFase(i + 1), 400); };
 }
 
@@ -501,9 +537,18 @@ function abrirLoginProfessor() {
     </form>
     <button class="btn btn-texto" onclick="fecharModal()">Cancelar</button>`);
   $('#prof-pin').focus();
-  $('#form-prof').onsubmit = e => {
+  $('#form-prof').onsubmit = async e => {
     e.preventDefault();
-    if ($('#prof-pin').value === dados.config.pin) { fecharModal(); abrirPainel(); }
+    const pin = $('#prof-pin').value;
+    if (Banco.ativo) {
+      const botao = $('#form-prof .btn-primario');
+      botao.disabled = true; botao.textContent = 'Carregando...';
+      try { painelDados = await carregarPainelOnline(pin); fecharModal(); abrirPainel(); }
+      catch (falha) { $('#prof-erro').textContent = mensagemErro(falha); }
+      finally { botao.disabled = false; botao.textContent = 'Entrar'; }
+      return;
+    }
+    if (pin === dados.config.pin) { fecharModal(); abrirPainel(); }
     else $('#prof-erro').textContent = 'PIN incorreto.';
   };
 }
@@ -519,9 +564,14 @@ function resumoAluno(a) {
   };
 }
 
+// No modo aparelho, o painel lê o navegador. Com banco, lê o que veio do banco (todos os aparelhos).
+let painelDados = null;
 function abrirPainel() {
-  dados = Store.ler();
-  const turmas = [...new Set(Object.values(dados.alunos).map(a => a.turma))].sort();
+  if (!Banco.ativo) { dados = Store.ler(); painelDados = dados; }
+  $('#painel-aviso').textContent = Banco.ativo
+    ? '☁️ Dados do banco de dados online: aparecem os estudantes de todos os aparelhos.'
+    : 'Os dados ficam salvos apenas neste navegador. Para juntar os resultados de vários aparelhos, exporte o backup em cada um e importe aqui.';
+  const turmas = [...new Set(Object.values(painelDados.alunos).map(a => a.turma))].sort();
   $('#painel-turma').innerHTML = `<option value="">Todas as turmas</option>` + turmas.map(t => `<option>${esc(t)}</option>`).join('');
   $('#painel-turma').onchange = renderPainel;
   renderPainel();
@@ -530,7 +580,7 @@ function abrirPainel() {
 
 function alunosFiltrados() {
   const t = $('#painel-turma').value;
-  return Object.values(dados.alunos).filter(a => !t || a.turma === t);
+  return Object.values(painelDados.alunos).filter(a => !t || a.turma === t);
 }
 
 function renderPainel() {
@@ -570,12 +620,12 @@ function renderPainel() {
   // Alunos
   $('#tabela-alunos').innerHTML = resumos.length ? `<table><thead><tr><th>#</th><th>Estudante</th><th>Turma</th><th>Pontos</th><th>★</th><th>Fases</th><th>Tentativas</th><th>% acerto</th><th>Meta</th></tr></thead><tbody>
     ${resumos.map((r, n) => `<tr class="clicavel" data-id="${esc(lista.find(a => a.nome === r.nome && a.turma === r.turma).id)}"><td>${n + 1}</td><td>${esc(r.nome)}</td><td>${esc(r.turma)}</td><td>${r.pontos}</td><td>${r.estrelas}</td><td>${r.fases}/${FASES.length}</td><td>${r.tentativas}</td><td>${r.taxa}%</td><td>${esc(r.meta)}</td></tr>`).join('')}
-    </tbody></table>` : '<p class="vazio">Nenhum estudante cadastrado neste aparelho ainda.</p>';
+    </tbody></table>` : `<p class="vazio">Nenhum estudante cadastrado ${Banco.ativo ? 'no banco' : 'neste aparelho'} ainda.</p>`;
   $('#tabela-alunos').onclick = e => { const tr = e.target.closest('tr.clicavel'); if (tr) abrirHistorico(tr.dataset.id); };
 }
 
 function abrirHistorico(id) {
-  const a = dados.alunos[id];
+  const a = painelDados.alunos[id];
   abrirModal(`
     <h2>📈 Histórico de ${esc(a.nome)}</h2>
     <p>Turma ${esc(a.turma)} · ${totalPontos(a)} pontos · maior sequência: ${a.maiorSequencia || 0}</p>
@@ -611,17 +661,26 @@ function exportarRespostas() {
 }
 
 function exportarBackup() {
-  const copia = JSON.parse(JSON.stringify(dados));
-  delete copia.config;
+  const copia = { alunos: JSON.parse(JSON.stringify(painelDados.alunos)) };
   baixar(`backup-conectados-${hoje()}.json`, JSON.stringify(copia, null, 1), 'application/json');
 }
 
 function importarBackup(arquivo) {
   const leitor = new FileReader();
-  leitor.onload = () => {
+  leitor.onload = async () => {
+    let novo;
+    try { novo = JSON.parse(leitor.result); if (!novo.alunos || typeof novo.alunos !== 'object') throw new Error(); }
+    catch { alert('Arquivo inválido. Use um backup exportado por esta plataforma.'); return; }
+    if (Banco.ativo) {
+      try {
+        const r = await Banco.rpc('professor_importar', { p_pin: pinProfessor, p_alunos: novo.alunos });
+        painelDados = await carregarPainelOnline(pinProfessor);
+        toast(`✅ Enviado ao banco: ${r.adicionados} novos, ${r.mesclados} mesclados.`);
+        abrirPainel();
+      } catch (falha) { alert(mensagemErro(falha)); }
+      return;
+    }
     try {
-      const novo = JSON.parse(leitor.result);
-      if (!novo.alunos) throw new Error();
       let adicionados = 0, mesclados = 0;
       Object.values(novo.alunos).forEach(a => {
         const atual = dados.alunos[a.id];
@@ -655,22 +714,45 @@ function iniciarPainel() {
     const novo = prompt('Novo PIN do painel (4 a 8 números):');
     if (novo === null) return;
     if (!/^\d{4,8}$/.test(novo)) { alert('O PIN deve ter de 4 a 8 números.'); return; }
+    if (Banco.ativo) {
+      Banco.rpc('professor_alterar_pin', { p_pin: pinProfessor, p_novo: novo })
+        .then(() => { pinProfessor = novo; toast('🔐 PIN alterado no banco.'); })
+        .catch(falha => alert(mensagemErro(falha)));
+      return;
+    }
     dados.config.pin = novo; Store.salvar(dados); toast('🔐 PIN alterado.');
   };
-  $('#btn-apagar').onclick = () => {
+  $('#btn-apagar').onclick = async () => {
+    if (Banco.ativo) {
+      if (!confirm('Apagar TODOS os dados dos estudantes do BANCO DE DADOS? Isso apaga o progresso de todos os aparelhos. Faça um backup antes. Esta ação não pode ser desfeita.')) return;
+      try {
+        await Banco.rpc('professor_apagar_tudo', { p_pin: pinProfessor });
+        painelDados = { alunos: {} };
+        dados.alunos = {}; Store.salvar(dados); Store.sessao(null);
+        renderPainel(); toast('Dados apagados do banco.');
+      } catch (falha) { alert(mensagemErro(falha)); }
+      return;
+    }
     if (!confirm('Apagar TODOS os dados dos estudantes deste aparelho? Faça um backup antes. Esta ação não pode ser desfeita.')) return;
     dados.alunos = {}; Store.salvar(dados); Store.sessao(null); renderPainel(); toast('Dados apagados.');
   };
-  $('#btn-sair-painel').onclick = () => mostrar('tela-login');
+  $('#btn-sair-painel').onclick = () => {
+    pinProfessor = null;
+    painelDados = null;
+    mostrar('tela-login');
+  };
 }
 
 /* ---------------- INÍCIO ---------------- */
 document.addEventListener('DOMContentLoaded', () => {
   iniciarLogin();
   iniciarPainel();
-  $('#btn-conquistas').onclick = abrirConquistas;
-  $('#btn-trocar-personagem').onclick = abrirPersonagens;
-  $('#btn-sair').onclick = () => { Store.sessao(null); aluno = null; $('#form-login').reset(); mostrar('tela-login'); };
+  iniciarRanking();
+  $('#btn-trocar-personagem').onclick = abrirPerfil;
+  $('#nav-inferior').onclick = e => {
+    const b = e.target.closest('[data-ir]'); if (!b || !aluno) return;
+    ({ trilha: abrirTrilha, ranking: abrirRanking, perfil: abrirPerfil })[b.dataset.ir]();
+  };
   $('#quiz-sair').onclick = () => { if (confirm('Sair da fase? O progresso desta tentativa será perdido.')) abrirTrilha(); };
   $('#modal').onclick = e => { if (e.target.id === 'modal') fecharModal(); };
   document.addEventListener('keydown', e => {
@@ -685,6 +767,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (sessao && dados.alunos[sessao]) {
     aluno = dados.alunos[sessao];
     personagemDe(aluno.personagem) ? abrirTrilha() : abrirPersonagens();
+    if (Banco.ativo) {
+      if (!Sync.token) Sync.pendente = true;   // sessão feita sem internet: entra no banco agora
+      Sync.enviar().then(() => atualizarRanking());
+    }
   } else mostrar('tela-login');
+  $('#status-banco').textContent = Banco.ativo ? '☁️ Progresso salvo online' : '📱 Progresso salvo só neste aparelho';
   $('#login-personagens').innerHTML = PERSONAGENS.map(p => avatarSVG(p, 'login')).join('');
 });

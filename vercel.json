@@ -1,5 +1,5 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "$schema": "https://matematica-financeira.vercel.app/",
   "cleanUrls": true,
   "trailingSlash": false,
   "headers": [

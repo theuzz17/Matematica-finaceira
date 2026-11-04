@@ -30,6 +30,7 @@
       </form>
       <p class="dica">Primeira vez? Basta preencher: sua conta é criada automaticamente. Guarde sua senha!</p>
       <button class="btn btn-texto" id="btn-professor">👩‍🏫 Sou professora / pesquisadora</button>
+      <p class="status-banco" id="status-banco"></p>
       <p class="rodape">EMEF Antonia Luna Lisboa · Rio Tinto–PB</p>
     </div>
   </section>
@@ -46,14 +47,13 @@
   <!-- TRILHA -->
   <section id="tela-trilha" class="tela">
     <header class="topo">
-      <button class="topo-perfil" id="btn-trocar-personagem" title="Trocar personagem">
+      <button class="topo-perfil" id="btn-trocar-personagem" title="Meu perfil">
         <span id="topo-avatar" class="avatar"></span><span id="topo-nome"></span>
       </button>
       <div class="topo-stats">
+        <span class="stat ofensiva" id="topo-ofensiva-wrap" title="Ofensiva"><span class="fogo-ic">🔥</span> <b id="topo-ofensiva">0</b></span>
         <span class="stat" title="Pontos">💎 <b id="topo-pontos">0</b></span>
         <span class="stat" title="Estrelas">⭐ <b id="topo-estrelas">0</b></span>
-        <button class="stat btn-icone" id="btn-conquistas" title="Conquistas" aria-label="Conquistas">🏅</button>
-        <button class="stat btn-icone" id="btn-sair" title="Sair" aria-label="Sair">🚪</button>
       </div>
     </header>
     <div class="conteudo">
@@ -61,6 +61,27 @@
       <h2 class="titulo-trilha">🗺️ Trilha do Dinheiro Esperto</h2>
       <div id="mapa" class="mapa"></div>
     </div>
+  </section>
+
+  <!-- RANKING -->
+  <section id="tela-ranking" class="tela">
+    <header class="topo">
+      <strong class="topo-tit">🏆 Ranking</strong>
+      <span class="stat" title="XP ganho nesta semana">⚡ <b id="rk-xp">0</b> XP na semana</span>
+    </header>
+    <div class="conteudo">
+      <div class="abas" role="tablist" aria-label="Tipo de ranking">
+        <button class="aba ativa" role="tab" data-aba="liga">🛡️ Liga</button>
+        <button class="aba" role="tab" data-aba="turma">👥 Turma</button>
+        <button class="aba" role="tab" data-aba="geral">🌎 Geral</button>
+      </div>
+      <div id="ranking-conteudo"></div>
+    </div>
+  </section>
+
+  <!-- PERFIL -->
+  <section id="tela-perfil" class="tela">
+    <div id="perfil-conteudo"></div>
   </section>
 
   <!-- QUIZ -->
@@ -135,7 +156,7 @@
           <button class="btn btn-secundario" id="btn-pin">🔐 Alterar PIN</button>
           <button class="btn btn-perigo" id="btn-apagar">🗑️ Apagar todos os dados</button>
         </div>
-        <p class="aviso">Os dados ficam salvos apenas neste navegador. Para juntar os resultados de vários aparelhos, exporte o backup em cada um e importe aqui.</p>
+        <p class="aviso" id="painel-aviso"></p>
       </div>
     </div>
   </section>
@@ -144,8 +165,19 @@
   <div id="modal" class="modal"><div class="modal-caixa" id="modal-conteudo" role="dialog" aria-modal="true"></div></div>
   <div id="toasts" class="toasts"></div>
 
+  <!-- NAVEGAÇÃO INFERIOR -->
+  <nav id="nav-inferior" class="nav-inferior" aria-label="Navegação principal" hidden>
+    <button data-ir="trilha"><span aria-hidden="true">🗺️</span>Trilha</button>
+    <button data-ir="ranking"><span aria-hidden="true">🏆</span>Ranking</button>
+    <button data-ir="perfil"><span aria-hidden="true">👤</span>Perfil</button>
+  </nav>
+
+  <script src="js/config.js"></script>
   <script src="js/personagens.js"></script>
   <script src="js/questoes.js"></script>
+  <script src="js/ranking.js"></script>
+  <script src="js/perfil.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/banco.js"></script>
 </body>
 </html>
