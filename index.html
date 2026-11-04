@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Conectados com o Dinheiro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- LOGIN -->
+  <section id="tela-login" class="tela">
+    <div class="login-caixa">
+      <div class="login-personagens" id="login-personagens" aria-hidden="true"></div>
+      <h1>Conectados com o Dinheiro</h1>
+      <p class="subtitulo">Matemática Financeira na Era Digital</p>
+      <span class="selo-turma">8º ano · Rio Tinto–PB</span>
+      <form id="form-login" autocomplete="off">
+        <label class="campo">Seu nome<input id="login-nome" maxlength="40" autocapitalize="words" placeholder="Ex.: Maria Silva" required></label>
+        <label class="campo">Turma<input id="login-turma" maxlength="15" placeholder="Ex.: 8º A" required></label>
+        <label class="campo">Senha (4 números)<input id="login-pin" type="password" inputmode="numeric" maxlength="4" pattern="\d{4}" placeholder="••••" required></label>
+        <p class="erro" id="login-erro"></p>
+        <button class="btn btn-primario btn-grande" type="submit">Entrar na trilha 🚀</button>
+      </form>
+      <p class="dica">Primeira vez? Basta preencher: sua conta é criada automaticamente. Guarde sua senha!</p>
+      <button class="btn btn-texto" id="btn-professor">👩‍🏫 Sou professora / pesquisadora</button>
+      <p class="rodape">EMEF Antonia Luna Lisboa · Rio Tinto–PB</p>
+    </div>
+  </section>
+
+  <!-- ESCOLHA DE PERSONAGEM -->
+  <section id="tela-personagem" class="tela">
+    <div class="conteudo">
+      <h1>Escolha seu parceiro de trilha</h1>
+      <p class="subtitulo">Personagens de Rio Tinto que vão te acompanhar nos desafios!</p>
+      <div id="lista-personagens" class="grade-personagens"></div>
+    </div>
+  </section>
+
+  <!-- TRILHA -->
+  <section id="tela-trilha" class="tela">
+    <header class="topo">
+      <button class="topo-perfil" id="btn-trocar-personagem" title="Trocar personagem">
+        <span id="topo-avatar" class="avatar"></span><span id="topo-nome"></span>
+      </button>
+      <div class="topo-stats">
+        <span class="stat" title="Pontos">💎 <b id="topo-pontos">0</b></span>
+        <span class="stat" title="Estrelas">⭐ <b id="topo-estrelas">0</b></span>
+        <button class="stat btn-icone" id="btn-conquistas" title="Conquistas" aria-label="Conquistas">🏅</button>
+        <button class="stat btn-icone" id="btn-sair" title="Sair" aria-label="Sair">🚪</button>
+      </div>
+    </header>
+    <div class="conteudo">
+      <div id="meta-resumo"></div>
+      <h2 class="titulo-trilha">🗺️ Trilha do Dinheiro Esperto</h2>
+      <div id="mapa" class="mapa"></div>
+    </div>
+  </section>
+
+  <!-- QUIZ -->
+  <section id="tela-quiz" class="tela">
+    <header class="quiz-topo">
+      <button class="btn-icone" id="quiz-sair" aria-label="Sair da fase">✖</button>
+      <div class="quiz-progresso"><i id="quiz-barra"></i></div>
+      <span id="quiz-contador" class="quiz-contador"></span>
+    </header>
+    <div class="conteudo quiz-conteudo">
+      <div class="quiz-cabecalho">
+        <span id="quiz-fase" class="quiz-fase"></span>
+        <span id="quiz-sequencia" class="quiz-sequencia"></span>
+      </div>
+      <div class="quiz-guia">
+        <span id="quiz-personagem" class="quiz-personagem"></span>
+        <span id="quiz-fala" class="balao"></span>
+      </div>
+      <div class="cartao-questao">
+        <div id="quiz-chips" class="chips"></div>
+        <p id="quiz-texto" class="questao-texto"></p>
+        <div id="quiz-visual" class="quiz-visual" hidden></div>
+      </div>
+      <div id="quiz-opcoes" class="opcoes"></div>
+      <div id="quiz-feedback" class="feedback"></div>
+    </div>
+  </section>
+
+  <!-- RESULTADO -->
+  <section id="tela-resultado" class="tela">
+    <div class="conteudo resultado" id="resultado-conteudo"></div>
+  </section>
+
+  <!-- PAINEL PEDAGÓGICO -->
+  <section id="tela-professor" class="tela">
+    <header class="topo topo-prof">
+      <strong>👩‍🏫 Painel pedagógico</strong>
+      <button class="btn btn-texto claro" id="btn-sair-painel">Sair</button>
+    </header>
+    <div class="conteudo largo">
+      <div class="painel-filtros">
+        <select id="painel-turma" aria-label="Filtrar por turma"></select>
+      </div>
+      <div id="painel-tiles" class="tiles"></div>
+
+      <div class="painel-card">
+        <h3>Acerto por conteúdo</h3>
+        <p class="legenda">Percentual de questões respondidas corretamente, do conteúdo com mais dificuldade para o de menos.</p>
+        <div id="grafico-temas" class="grafico-barras"></div>
+        <details><summary>Ver tabela</summary><div id="tabela-temas" class="tabela-rolagem"></div></details>
+      </div>
+
+      <div class="painel-card">
+        <h3>Desempenho por fase da trilha</h3>
+        <div id="tabela-fases" class="tabela-rolagem"></div>
+      </div>
+
+      <div class="painel-card">
+        <h3>Estudantes</h3>
+        <p class="legenda">Toque em um estudante para ver o histórico de pontuação.</p>
+        <div id="tabela-alunos" class="tabela-rolagem"></div>
+      </div>
+
+      <div class="painel-card nao-imprimir">
+        <h3>Exportar e gerenciar</h3>
+        <div class="botoes-painel">
+          <button class="btn btn-secundario" id="btn-exp-resumo">📊 Resumo (CSV/Excel)</button>
+          <button class="btn btn-secundario" id="btn-exp-respostas">📝 Respostas detalhadas (CSV)</button>
+          <button class="btn btn-secundario" id="btn-imprimir">🖨️ Imprimir / PDF</button>
+          <button class="btn btn-secundario" id="btn-exp-backup">💾 Backup dos dados (JSON)</button>
+          <label class="btn btn-secundario">📥 Importar backup de outro aparelho<input type="file" id="input-importar" accept=".json,application/json" hidden></label>
+          <button class="btn btn-secundario" id="btn-pin">🔐 Alterar PIN</button>
+          <button class="btn btn-perigo" id="btn-apagar">🗑️ Apagar todos os dados</button>
+        </div>
+        <p class="aviso">Os dados ficam salvos apenas neste navegador. Para juntar os resultados de vários aparelhos, exporte o backup em cada um e importe aqui.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- MODAL -->
+  <div id="modal" class="modal"><div class="modal-caixa" id="modal-conteudo" role="dialog" aria-modal="true"></div></div>
+  <div id="toasts" class="toasts"></div>
+
+  <script src="js/personagens.js"></script>
+  <script src="js/questoes.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
