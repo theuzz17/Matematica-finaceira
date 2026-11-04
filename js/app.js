@@ -52,6 +52,9 @@ let quiz = null;
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const normalizar = s => s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+// Turma: "8º A", "8A", "8 a", "8° A" e "8º ano A" viram todas "8a" (mesma regra do banco).
+const normalizarTurma = s => String(s).toLowerCase().replace(/[ºª°]/g, '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\bano\b/g, '').replace(/[^a-z0-9]/g, '');
+const chaveConta = (turma, nome) => normalizarTurma(turma) + '|' + normalizar(nome);
 
 function salvarAluno() { dados.alunos[aluno.id] = aluno; Store.salvar(dados); Sync.agendar(); }
 
@@ -87,44 +90,97 @@ const fasesConcluidas = a => Object.values(a.fases).filter(f => f.estrelas > 0).
 const faseLiberada = i => i === 0 || !!aluno.fases[FASES[i].id] || (aluno.fases[FASES[i - 1].id]?.estrelas || 0) > 0;
 
 /* ---------------- LOGIN ---------------- */
+// "entrar" só abre conta que já existe; "criar" só cria conta nova.
+let modoLogin = 'entrar';
+const TEXTOS_LOGIN = {
+  entrar: { botao: 'Entrar 🚀', carregando: 'Entrando...', dica: 'Use o mesmo nome, turma e senha de quando criou a conta. Seu progresso volta em qualquer aparelho. Esqueceu a senha? Peça para a professora criar uma nova.' },
+  criar: { botao: 'Criar minha conta ✨', carregando: 'Criando...', dica: 'Escreva seu nome completo e escolha uma senha de 4 números que você vai lembrar. Com ela você entra em qualquer aparelho.' },
+};
+
+function trocarModoLogin(modo) {
+  modoLogin = modo;
+  document.querySelectorAll('.abas-login .aba').forEach(b => {
+    const on = b.dataset.modo === modo;
+    b.classList.toggle('ativa', on); b.setAttribute('aria-selected', on);
+  });
+  $('#campo-pin2').hidden = modo !== 'criar';
+  $('#login-pin2').required = modo === 'criar';
+  $('#btn-login').textContent = TEXTOS_LOGIN[modo].botao;
+  $('#login-dica').textContent = TEXTOS_LOGIN[modo].dica;
+  $('#login-erro').textContent = '';
+}
+
+// Mostra a mensagem de erro e, quando ajuda, troca para a outra aba.
+function erroLogin(msg, sugerir) {
+  $('#login-erro').innerHTML = esc(msg) + (sugerir ? ` <button type="button" class="link-erro" id="erro-trocar">${sugerir === 'criar' ? 'Criar conta' : 'Ir para Entrar'}</button>` : '');
+  if (sugerir) $('#erro-trocar').onclick = () => { trocarModoLogin(sugerir); if (sugerir === 'criar') $('#login-pin2').focus(); };
+}
+
+function lembrarUltimoLogin(nome, turma) { try { localStorage.setItem(CHAVE + '_ultimo', JSON.stringify({ nome, turma })); } catch { /* sem armazenamento */ } }
+function preencherUltimoLogin() {
+  try {
+    const u = JSON.parse(localStorage.getItem(CHAVE + '_ultimo'));
+    if (u?.nome) { $('#login-nome').value = u.nome; $('#login-turma').value = u.turma || ''; }
+  } catch { /* sem armazenamento */ }
+}
+
 function iniciarLogin() {
+  document.querySelectorAll('.abas-login .aba').forEach(b => b.onclick = () => trocarModoLogin(b.dataset.modo));
+  trocarModoLogin('entrar');
+  preencherUltimoLogin();
+
   $('#form-login').onsubmit = async e => {
     e.preventDefault();
+    const modo = modoLogin;
     const nome = $('#login-nome').value.trim().replace(/\s+/g, ' ');
     const turma = $('#login-turma').value.trim().replace(/\s+/g, ' ');
     const pin = $('#login-pin').value.trim();
-    const erro = $('#login-erro');
-    if (nome.length < 2 || !turma || !/^\d{4}$/.test(pin)) { erro.textContent = 'Preencha nome, turma e uma senha de 4 números.'; return; }
+    if (nome.length < 2 || !turma || !/^\d{4}$/.test(pin)) { erroLogin('Preencha nome, turma e uma senha de 4 números.'); return; }
+    if (modo === 'criar' && $('#login-pin2').value.trim() !== pin) { erroLogin('As duas senhas não são iguais. Digite de novo.'); return; }
+    const entrou = () => {
+      lembrarUltimoLogin(nome, turma);
+      $('#login-pin').value = ''; $('#login-pin2').value = ''; $('#login-erro').textContent = '';
+      personagemDe(aluno.personagem) ? abrirTrilha() : abrirPersonagens();
+      if (modo === 'criar') toast('🎉 Conta criada! Guarde seu nome, turma e senha para entrar de novo.');
+    };
 
-    // Com banco de dados: entra pelo banco. Sem internet, cai no modo do aparelho.
+    // Com banco de dados: entra ou cria pelo banco. Sem internet, usa o aparelho.
     if (Banco.ativo) {
-      const botao = $('#form-login button[type=submit]'), texto = botao.textContent;
-      botao.disabled = true; botao.textContent = 'Entrando...'; erro.textContent = '';
+      const botao = $('#btn-login');
+      botao.disabled = true; botao.textContent = TEXTOS_LOGIN[modo].carregando; $('#login-erro').textContent = '';
       try {
-        await entrarOnline(nome, turma, pin);
-        personagemDe(aluno.personagem) ? abrirTrilha() : abrirPersonagens();
+        await entrarOnline(nome, turma, pin, modo);
+        entrou();
         return;
       } catch (falha) {
-        if (falha.codigo !== 'SEM_CONEXAO' && falha.codigo !== 'SERVIDOR') { erro.textContent = mensagemErro(falha); return; }
-        toast('📴 Sem conexão com o banco. Entrando no modo do aparelho: seu progresso será enviado depois.');
-      } finally { botao.disabled = false; botao.textContent = texto; }
+        if (falha.codigo === 'CONTA_NAO_ENCONTRADA') { erroLogin(mensagemErro(falha), 'criar'); return; }
+        if (falha.codigo === 'CONTA_EXISTE') { erroLogin(mensagemErro(falha), 'entrar'); return; }
+        if (falha.codigo !== 'SEM_CONEXAO' && falha.codigo !== 'SERVIDOR') { erroLogin(mensagemErro(falha)); return; }
+        toast('📴 Sem conexão com o banco. Usando o modo do aparelho: seu progresso será enviado depois.');
+      } finally { botao.disabled = false; botao.textContent = TEXTOS_LOGIN[modoLogin].botao; }
     }
 
-    // Procura pelo nome atual (o estudante pode ter trocado o nome no perfil).
-    const chave = normalizar(turma) + '|' + normalizar(nome);
-    const existente = Object.values(dados.alunos).find(a => normalizar(a.turma) + '|' + normalizar(a.nome) === chave);
-    if (existente) {
-      if (existente.pin !== pin) { erro.textContent = 'Senha incorreta para este nome e turma.'; return; }
+    // Modo do aparelho. Procura pelo nome atual (o estudante pode ter trocado o nome no perfil).
+    const chave = chaveConta(turma, nome);
+    const existente = Object.values(dados.alunos).find(a => chaveConta(a.turma, a.nome) === chave);
+    if (modo === 'entrar') {
+      if (!existente) {
+        erroLogin(Banco.ativo
+          ? 'Sem internet, só dá para entrar em contas já usadas neste aparelho. Conecte-se e tente de novo.'
+          : 'Não encontramos uma conta com esse nome nesta turma neste aparelho. Confira como você escreveu ou crie uma conta.', Banco.ativo ? null : 'criar');
+        return;
+      }
+      if (existente.pin !== pin) { erroLogin('Senha incorreta para este nome e turma.'); return; }
       aluno = existente;
     } else {
+      if (existente) { erroLogin('Já existe uma conta com esse nome nesta turma. Se é sua, use "Entrar" com a sua senha.', 'entrar'); return; }
       let id = chave, n = 2;
       while (dados.alunos[id]) id = `${chave}#${n++}`;
       aluno = { id, nome, turma, pin, personagem: null, criadoEm: new Date().toISOString(), fases: {}, tentativas: [], conquistas: [], meta: null, maiorSequencia: 0, perfil: {} };
       salvarAluno();
     }
-    erro.textContent = '';
     Store.sessao(aluno.id);
-    personagemDe(aluno.personagem) ? abrirTrilha() : abrirPersonagens();
+    entrou();
   };
   $('#btn-professor').onclick = () => abrirLoginProfessor();
 }
@@ -632,7 +688,31 @@ function abrirHistorico(id) {
     <div class="tabela-rolagem">${a.tentativas.length ? `<table><thead><tr><th>Data</th><th>Fase</th><th>Acertos</th><th>Pontos</th><th>★</th></tr></thead><tbody>
       ${a.tentativas.slice().reverse().map(t => `<tr><td>${new Date(t.data).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${esc(t.fase)}</td><td>${t.acertos}/${t.total}</td><td>${t.pontos}</td><td>${t.estrelas}</td></tr>`).join('')}
       </tbody></table>` : '<p class="vazio">Nenhuma tentativa ainda.</p>'}</div>
+    <button class="btn btn-secundario btn-grande" id="btn-nova-senha">🔑 Criar senha nova para este estudante</button>
+    <button class="btn btn-perigo btn-grande" id="btn-apagar-aluno">🗑️ Apagar esta conta</button>
     <button class="btn btn-texto" onclick="fecharModal()">Fechar</button>`);
+  $('#btn-apagar-aluno').onclick = async () => {
+    if (!confirm(`Apagar a conta de ${a.nome} (turma ${a.turma}) e todo o progresso? Esta ação não pode ser desfeita.`)) return;
+    if (Banco.ativo) {
+      try { await Banco.rpc('professor_apagar_aluno', { p_pin: pinProfessor, p_aluno: id }); }
+      catch (falha) { alert(mensagemErro(falha)); return; }
+    }
+    delete painelDados.alunos[id];
+    if (dados.alunos[id]) { delete dados.alunos[id]; Store.salvar(dados); }
+    fecharModal(); abrirPainel(); toast(`🗑️ Conta de ${esc(a.nome)} apagada.`);
+  };
+  $('#btn-nova-senha').onclick = async () => {
+    const nova = prompt(`Nova senha de ${a.nome} (4 números):`);
+    if (nova === null) return;
+    if (!/^\d{4}$/.test(nova.trim())) { alert('A senha precisa ter 4 números.'); return; }
+    if (Banco.ativo) {
+      try { await Banco.rpc('professor_redefinir_senha', { p_pin: pinProfessor, p_aluno: id, p_nova: nova.trim() }); }
+      catch (falha) { alert(mensagemErro(falha)); return; }
+    } else {
+      a.pin = nova.trim(); Store.salvar(dados);
+    }
+    toast(`🔑 Senha nova de ${esc(a.nome)}: ${nova.trim()}. Avise o estudante.`);
+  };
 }
 
 /* ---------------- EXPORTAÇÃO / IMPORTAÇÃO ---------------- */

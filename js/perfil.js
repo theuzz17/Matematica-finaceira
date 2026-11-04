@@ -168,8 +168,7 @@ function abrirEditarPerfil() {
     const apelido = $('#pf-apelido').value.trim().replace(/\s+/g, ' ');
     const atual = $('#pf-senha-atual').value.trim(), nova = $('#pf-senha-nova').value.trim();
     if (nome.length < 2) { erro.textContent = 'O nome precisa ter pelo menos 2 letras.'; return; }
-    const turma = normalizar(aluno.turma);
-    if (Object.values(dados.alunos).some(o => o.id !== aluno.id && normalizar(o.turma) === turma && normalizar(o.nome) === normalizar(nome))) {
+    if (Object.values(dados.alunos).some(o => o.id !== aluno.id && chaveConta(o.turma, o.nome) === chaveConta(aluno.turma, nome))) {
       erro.textContent = 'Já existe alguém com esse nome nesta turma.'; return;
     }
     if (atual || nova) {
@@ -210,5 +209,7 @@ async function sairDaConta() {
   await sairOnline();
   Store.sessao(null); aluno = null;
   $('#form-login').reset();
+  trocarModoLogin('entrar');
+  preencherUltimoLogin();
   mostrar('tela-login');
 }

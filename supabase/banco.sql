@@ -67,6 +67,14 @@ language sql stable set search_path = public, extensions as $$
   select lower(extensions.unaccent(regexp_replace(trim(coalesce(t, '')), '\s+', ' ', 'g')))
 $$;
 
+-- Turma: "8º A", "8A", "8 a", "8° A" e "8º ano A" viram todas "8a".
+create or replace function public.normalizar_turma(t text) returns text
+language sql stable set search_path = public, extensions as $$
+  select regexp_replace(
+           regexp_replace(lower(extensions.unaccent(regexp_replace(coalesce(t, ''), '[ºª°]', '', 'g'))), '\mano\M', '', 'g'),
+           '[^a-z0-9]', '', 'g')
+$$;
+
 create or replace function public.limpar(t text) returns text
 language sql immutable as $$
   select regexp_replace(trim(coalesce(t, '')), '\s+', ' ', 'g')
@@ -177,10 +185,13 @@ end $$;
 -- Erros voltam como {"erro": "CODIGO"} para o site mostrar a mensagem certa.
 -- ---------------------------------------------------------
 
--- Entra na conta ou cria uma nova. Se o aparelho já tinha progresso
--- guardado (p_dados), ele é juntado ao que está no banco.
-create or replace function public.entrar(p_turma text, p_nome text, p_pin text, p_dados jsonb default null) returns jsonb
-language plpgsql security definer set search_path = public, extensions as $$
+-- Núcleo do acesso. p_modo:
+--   'entrar' = só entra em conta que já existe (erro CONTA_NAO_ENCONTRADA)
+--   'criar'  = só cria conta nova (erro CONTA_EXISTE)
+--   'ambos'  = entra ou cria (usado para enviar progresso feito sem internet)
+-- Se o aparelho já tinha progresso guardado (p_dados), ele é juntado ao do banco.
+create or replace function public.acessar_conta(p_turma text, p_nome text, p_pin text, p_dados jsonb, p_modo text) returns jsonb
+language plpgsql set search_path = public, extensions as $$
 declare
   r   public.alunos;
   tok uuid;
@@ -195,8 +206,14 @@ begin
   end if;
 
   select * into r from public.alunos
-  where turma_norm = public.normalizar(tm) and nome_norm = public.normalizar(nm)
+  where turma_norm = public.normalizar_turma(tm) and nome_norm = public.normalizar(nm)
   for update;
+
+  if found and p_modo = 'criar' then
+    return jsonb_build_object('erro', 'CONTA_EXISTE');
+  elsif not found and p_modo = 'entrar' then
+    return jsonb_build_object('erro', 'CONTA_NAO_ENCONTRADA');
+  end if;
 
   if found then
     if r.bloqueado_ate is not null and r.bloqueado_ate > now() then
@@ -217,7 +234,7 @@ begin
     returning * into r;
   else
     insert into public.alunos (nome, turma, nome_norm, turma_norm, pin_hash, dados)
-    values (nm, tm, public.normalizar(nm), public.normalizar(tm),
+    values (nm, tm, public.normalizar(nm), public.normalizar_turma(tm),
             extensions.crypt(p_pin, extensions.gen_salt('bf', 8)),
             public.mesclar_dados('{}'::jsonb, coalesce(p_dados, '{}'::jsonb)))
     returning * into r;
@@ -226,6 +243,24 @@ begin
   insert into public.sessoes (aluno_id) values (r.id) returning token into tok;
   return jsonb_build_object('token', tok, 'aluno', public.registro_aluno(r));
 end $$;
+
+-- Botão "Entrar": só funciona se a conta já existe.
+create or replace function public.entrar_conta(p_turma text, p_nome text, p_pin text, p_dados jsonb default null) returns jsonb
+language sql security definer set search_path = public, extensions as $$
+  select public.acessar_conta(p_turma, p_nome, p_pin, p_dados, 'entrar')
+$$;
+
+-- Botão "Criar conta": só funciona se ainda não existe conta com esse nome na turma.
+create or replace function public.criar_conta(p_turma text, p_nome text, p_pin text, p_dados jsonb default null) returns jsonb
+language sql security definer set search_path = public, extensions as $$
+  select public.acessar_conta(p_turma, p_nome, p_pin, p_dados, 'criar')
+$$;
+
+-- Entra ou cria. O site usa só para enviar o progresso de uma conta criada sem internet.
+create or replace function public.entrar(p_turma text, p_nome text, p_pin text, p_dados jsonb default null) returns jsonb
+language sql security definer set search_path = public, extensions as $$
+  select public.acessar_conta(p_turma, p_nome, p_pin, p_dados, 'ambos')
+$$;
 
 -- Salva o progresso. Também troca o nome, se ele mudou e não estiver em uso.
 create or replace function public.salvar_aluno(p_token uuid, p_dados jsonb) returns jsonb
@@ -361,14 +396,14 @@ begin
     nm := public.limpar(reg->>'nome');
     tm := public.limpar(reg->>'turma');
     continue when char_length(nm) not between 2 and 40 or char_length(tm) not between 1 and 15;
-    select * into r from public.alunos where turma_norm = public.normalizar(tm) and nome_norm = public.normalizar(nm) for update;
+    select * into r from public.alunos where turma_norm = public.normalizar_turma(tm) and nome_norm = public.normalizar(nm) for update;
     if found then
       update public.alunos set dados = public.mesclar_dados(dados, reg), atualizado_em = now() where id = r.id;
       mesclados := mesclados + 1;
     else
       pin := case when coalesce(reg->>'pin', '') ~ '^\d{4}$' then reg->>'pin' else '0000' end;
       insert into public.alunos (nome, turma, nome_norm, turma_norm, pin_hash, dados)
-      values (nm, tm, public.normalizar(nm), public.normalizar(tm),
+      values (nm, tm, public.normalizar(nm), public.normalizar_turma(tm),
               extensions.crypt(pin, extensions.gen_salt('bf', 8)), public.mesclar_dados('{}'::jsonb, reg));
       adicionados := adicionados + 1;
     end if;
@@ -376,19 +411,61 @@ begin
   return jsonb_build_object('adicionados', adicionados, 'mesclados', mesclados);
 end $$;
 
+-- Estudante esqueceu a senha: a professora define uma nova pelo painel.
+create or replace function public.professor_redefinir_senha(p_pin text, p_aluno uuid, p_nova text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare st text := public.conferir_pin_professor(p_pin);
+begin
+  if st <> 'OK' then return jsonb_build_object('erro', st); end if;
+  if coalesce(p_nova, '') !~ '^\d{4}$' then return jsonb_build_object('erro', 'DADOS_INVALIDOS'); end if;
+  update public.alunos set pin_hash = extensions.crypt(p_nova, extensions.gen_salt('bf', 8)), falhas = 0, bloqueado_ate = null
+  where id = p_aluno;
+  if not found then return jsonb_build_object('erro', 'CONTA_NAO_ENCONTRADA'); end if;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- Apaga a conta de um estudante (por exemplo, uma conta de teste ou repetida).
+create or replace function public.professor_apagar_aluno(p_pin text, p_aluno uuid) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare st text := public.conferir_pin_professor(p_pin);
+begin
+  if st <> 'OK' then return jsonb_build_object('erro', st); end if;
+  delete from public.alunos where id = p_aluno;
+  if not found then return jsonb_build_object('erro', 'CONTA_NAO_ENCONTRADA'); end if;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- Atualiza contas antigas para a nova regra de turma ("8A" = "8º A").
+-- Se duas contas antigas virarem a mesma, as duas ficam como estavam.
+do $$
+declare r record;
+begin
+  for r in select id, turma from public.alunos where turma_norm <> public.normalizar_turma(turma) loop
+    begin
+      update public.alunos set turma_norm = public.normalizar_turma(r.turma) where id = r.id;
+    exception when unique_violation then null;
+    end;
+  end loop;
+end $$;
+
 -- ---------------------------------------------------------
 -- PERMISSÕES: o site (papel "anon") só pode chamar as funções públicas.
 -- ---------------------------------------------------------
 revoke execute on function
-  public.normalizar(text), public.limpar(text), public.mesclar_dados(jsonb, jsonb),
+  public.normalizar(text), public.normalizar_turma(text), public.limpar(text), public.mesclar_dados(jsonb, jsonb),
   public.registro_aluno(public.alunos), public.aluno_da_sessao(uuid), public.conferir_pin_professor(text),
-  public.entrar(text, text, text, jsonb), public.salvar_aluno(uuid, jsonb), public.trocar_senha(uuid, text, text),
+  public.acessar_conta(text, text, text, jsonb, text),
+  public.entrar(text, text, text, jsonb), public.entrar_conta(text, text, text, jsonb), public.criar_conta(text, text, text, jsonb),
+  public.salvar_aluno(uuid, jsonb), public.trocar_senha(uuid, text, text),
   public.sair(uuid), public.ranking_publico(uuid), public.painel_dados(text),
-  public.professor_alterar_pin(text, text), public.professor_apagar_tudo(text), public.professor_importar(text, jsonb)
+  public.professor_alterar_pin(text, text), public.professor_apagar_tudo(text), public.professor_importar(text, jsonb),
+  public.professor_redefinir_senha(text, uuid, text), public.professor_apagar_aluno(text, uuid)
 from public, anon, authenticated;
 
 grant execute on function
-  public.entrar(text, text, text, jsonb), public.salvar_aluno(uuid, jsonb), public.trocar_senha(uuid, text, text),
+  public.entrar(text, text, text, jsonb), public.entrar_conta(text, text, text, jsonb), public.criar_conta(text, text, text, jsonb),
+  public.salvar_aluno(uuid, jsonb), public.trocar_senha(uuid, text, text),
   public.sair(uuid), public.ranking_publico(uuid), public.painel_dados(text),
-  public.professor_alterar_pin(text, text), public.professor_apagar_tudo(text), public.professor_importar(text, jsonb)
+  public.professor_alterar_pin(text, text), public.professor_apagar_tudo(text), public.professor_importar(text, jsonb),
+  public.professor_redefinir_senha(text, uuid, text), public.professor_apagar_aluno(text, uuid)
 to anon, authenticated;

@@ -240,8 +240,8 @@ function htmlLiga() {
 }
 
 function htmlTurma() {
-  const semana = chaveSemana(new Date()), minha = normalizar(aluno.turma);
-  const lista = alunosRanking().filter(a => normalizar(a.turma) === minha)
+  const semana = chaveSemana(new Date()), minha = normalizarTurma(aluno.turma);
+  const lista = alunosRanking().filter(a => normalizarTurma(a.turma) === minha)
     .map(a => ({ a, xp: xpDaSemana(a, semana) })).sort(ordenarXP);
   return `<div class="rk-cabecalho"><h2>Turma ${esc(aluno.turma)}</h2><p>XP ganho nesta semana · ⏳ ${tempoRestante()}</p></div>
     ${podio(lista)}<div class="rk-lista">${lista.slice(3).map((g, i) => linhaRanking(g.a, i + 4, g.xp)).join('')}</div>

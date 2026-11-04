@@ -11,6 +11,8 @@ class ErroBanco extends Error {
 
 const MENSAGENS_BANCO = {
   SENHA_INCORRETA: 'Senha incorreta para este nome e turma.',
+  CONTA_NAO_ENCONTRADA: 'Não encontramos uma conta com esse nome nesta turma. Confira como você escreveu, ou crie uma conta se for a primeira vez.',
+  CONTA_EXISTE: 'Já existe uma conta com esse nome nesta turma. Se é sua, entre com a sua senha.',
   SENHA_ATUAL_INCORRETA: 'A senha atual está incorreta.',
   BLOQUEADO: 'Muitas tentativas erradas. Espere 15 minutos e tente de novo.',
   NOME_EM_USO: 'Já existe alguém com esse nome nesta turma.',
@@ -52,7 +54,7 @@ const gravarLS = (k, v) => { try { v == null ? localStorage.removeItem(CHAVE + k
 const semSenha = a => { const { pin, ...resto } = a; return resto; };
 // Garante os campos que o site espera, mesmo numa conta recém-criada no banco.
 const comPadroes = reg => ({ personagem: null, fases: {}, tentativas: [], conquistas: [], meta: null, maiorSequencia: 0, perfil: {}, ...reg });
-const chaveDe = a => normalizar(a.turma) + '|' + normalizar(a.nome);
+const chaveDe = a => chaveConta(a.turma, a.nome);
 
 const Sync = {
   timer: null,
@@ -127,10 +129,22 @@ function aplicarServidor(reg) {
   Store.sessao(aluno.id);
 }
 
-// Login pelo banco. Se o aparelho tinha progresso desta conta, ele vai junto.
-async function entrarOnline(nome, turma, pin) {
-  const local = Object.values(dados.alunos).find(a => chaveDe(a) === normalizar(turma) + '|' + normalizar(nome) && a.pin === pin);
-  const res = await Banco.rpc('entrar', { p_turma: turma, p_nome: nome, p_pin: pin, p_dados: local ? semSenha(local) : null });
+// Login ou criação de conta pelo banco. Se o aparelho tinha progresso desta conta, ele vai junto.
+async function entrarOnline(nome, turma, pin, modo = 'entrar') {
+  const local = Object.values(dados.alunos).find(a => chaveDe(a) === chaveConta(turma, nome) && a.pin === pin);
+  const args = { p_turma: turma, p_nome: nome, p_pin: pin, p_dados: local ? semSenha(local) : null };
+  let res;
+  try {
+    res = await Banco.rpc(modo === 'criar' ? 'criar_conta' : 'entrar_conta', args);
+  } catch (e) {
+    if (e.codigo === 'CONTA_NAO_ENCONTRADA' && local) {
+      // Conta que só existia neste aparelho (de antes do banco): leva para o banco com o progresso.
+      res = await Banco.rpc('criar_conta', args);
+    } else if (e.codigo === 'SERVIDOR' && /404|PGRST202/.test(e.detalhe)) {
+      // Banco ainda sem as funções novas (banco.sql antigo): usa a função antiga, que entra ou cria.
+      res = await Banco.rpc('entrar', args);
+    } else throw e;
+  }
   if (local) delete dados.alunos[local.id];
   Sync.token = res.token;
   Sync.pendente = false;

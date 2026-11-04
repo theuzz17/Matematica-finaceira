@@ -21,14 +21,19 @@
       <h1>Conectados com o Dinheiro</h1>
       <p class="subtitulo">Matemática Financeira na Era Digital</p>
       <span class="selo-turma">8º ano · Rio Tinto–PB</span>
+      <div class="abas abas-login" role="tablist" aria-label="Entrar ou criar conta">
+        <button type="button" class="aba ativa" role="tab" data-modo="entrar">🔑 Entrar</button>
+        <button type="button" class="aba" role="tab" data-modo="criar">✨ Criar conta</button>
+      </div>
       <form id="form-login" autocomplete="off">
         <label class="campo">Seu nome<input id="login-nome" maxlength="40" autocapitalize="words" placeholder="Ex.: Maria Silva" required></label>
         <label class="campo">Turma<input id="login-turma" maxlength="15" placeholder="Ex.: 8º A" required></label>
         <label class="campo">Senha (4 números)<input id="login-pin" type="password" inputmode="numeric" maxlength="4" pattern="\d{4}" placeholder="••••" required></label>
+        <label class="campo" id="campo-pin2" hidden>Repita a senha<input id="login-pin2" type="password" inputmode="numeric" maxlength="4" pattern="\d{4}" placeholder="••••"></label>
         <p class="erro" id="login-erro"></p>
-        <button class="btn btn-primario btn-grande" type="submit">Entrar na trilha 🚀</button>
+        <button class="btn btn-primario btn-grande" type="submit" id="btn-login">Entrar 🚀</button>
       </form>
-      <p class="dica">Primeira vez? Basta preencher: sua conta é criada automaticamente. Guarde sua senha!</p>
+      <p class="dica" id="login-dica"></p>
       <button class="btn btn-texto" id="btn-professor">👩‍🏫 Sou professora / pesquisadora</button>
       <p class="status-banco" id="status-banco"></p>
       <p class="rodape">EMEF Antonia Luna Lisboa · Rio Tinto–PB</p>

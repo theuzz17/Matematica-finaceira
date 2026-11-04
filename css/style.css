@@ -652,3 +652,7 @@ body.com-nav .toasts { bottom: calc(84px + env(safe-area-inset-bottom)); }
 /* ---------- STATUS DO BANCO ---------- */
 .status-banco { color: var(--texto-3); font-size: .82rem; font-weight: 700; margin: 6px 0 0; }
 .perfil-sync { color: var(--texto-3); font-size: .8rem; font-weight: 700; margin: -6px 0 12px; }
+
+/* ---------- ENTRAR / CRIAR CONTA ---------- */
+.abas-login { grid-template-columns: 1fr 1fr; margin: 16px 0 2px; }
+.link-erro { background: none; border: 0; padding: 0; color: var(--marca); font-weight: 800; text-decoration: underline; cursor: pointer; }
