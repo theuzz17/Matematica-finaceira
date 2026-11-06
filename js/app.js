@@ -14,8 +14,19 @@ const CONQUISTAS = [
   { id: 'graficos', icone: '📊', nome: 'Leitor de gráficos', desc: 'Concluiu o Mirante dos Gráficos.' },
   { id: 'consciente', icone: '🌿', nome: 'Consumidor consciente', desc: 'Concluiu a Aldeia do Consumo Consciente.' },
   { id: 'metade', icone: '🧭', nome: 'Meio do caminho', desc: 'Concluiu 6 fases.' },
-  { id: 'trilha', icone: '👑', nome: 'Trilha completa', desc: 'Concluiu todas as fases.' },
+  // "trilha" era "concluiu as 11 fases": hoje essas 11 fases são o Mundo 1.
+  { id: 'trilha', icone: '🌴', nome: 'Mundo 1 completo', desc: 'Concluiu todas as fases do Vale do Mamanguape.' },
   { id: 'estrelas', icone: '🌟', nome: 'Colecionador', desc: 'Juntou 20 estrelas.' },
+  { id: 'explorador', icone: '🔀', nome: 'Explorador', desc: 'Concluiu os dois caminhos de uma bifurcação.' },
+  { id: 'fases20', icone: '🗺️', nome: 'Viajante', desc: 'Concluiu 20 fases.' },
+  { id: 'mundo2', icone: '🦀', nome: 'Mundo 2 completo', desc: 'Concluiu todas as fases do Manguezal dos Negócios.' },
+  { id: 'mundo3', icone: '🏝️', nome: 'Mundo 3 completo', desc: 'Concluiu todas as fases da Ilha do Futuro.' },
+  { id: 'estrelas60', icone: '💫', nome: 'Constelação', desc: 'Juntou 60 estrelas.' },
+  { id: 'lenda', icone: '👑', nome: 'Lenda do dinheiro', desc: 'Ganhou 3 estrelas em todas as fases da trilha.' },
+  { id: 'poupador', icone: '🐖', nome: 'Poupador', desc: 'Juntou 300 moedas guardadas no cofrinho.' },
+  { id: 'comprador', icone: '🛍️', nome: 'Primeira compra', desc: 'Comprou um item na lojinha.' },
+  { id: 'estiloso', icone: '😎', nome: 'Estiloso', desc: 'Vestiu o bichinho com 4 itens ao mesmo tempo.' },
+  { id: 'superheroi', icone: '🦸', nome: 'Super-herói', desc: 'Vestiu um kit de herói completo.' },
 ];
 
 const PRODUTOS_META = [
@@ -58,7 +69,7 @@ const chaveConta = (turma, nome) => normalizarTurma(turma) + '|' + normalizar(no
 
 function salvarAluno() { dados.alunos[aluno.id] = aluno; Store.salvar(dados); Sync.agendar(); }
 
-const TELAS_NAV = { 'tela-trilha': 'trilha', 'tela-ranking': 'ranking', 'tela-perfil': 'perfil' };
+const TELAS_NAV = { 'tela-trilha': 'trilha', 'tela-loja': 'loja', 'tela-ranking': 'ranking', 'tela-perfil': 'perfil' };
 function mostrar(tela) {
   document.querySelectorAll('.tela').forEach(t => t.classList.toggle('ativa', t.id === tela));
   const aba = TELAS_NAV[tela], nav = $('#nav-inferior');
@@ -83,11 +94,12 @@ function toast(msg) {
 
 const personagemDe = id => PERSONAGENS.find(p => p.id === id);
 const personagem = () => personagemDe(aluno.personagem) || PERSONAGENS[0];
-const avatar = (classe = '') => avatarSVG(personagem(), classe);
+const avatar = (classe = '') => avatarSVG(personagem(), classe, aluno.visual);
 const totalPontos = a => Object.values(a.fases).reduce((s, f) => s + f.melhorPontos, 0);
 const totalEstrelas = a => Object.values(a.fases).reduce((s, f) => s + f.estrelas, 0);
 const fasesConcluidas = a => Object.values(a.fases).filter(f => f.estrelas > 0).length;
-const faseLiberada = i => i === 0 || !!aluno.fases[FASES[i].id] || (aluno.fases[FASES[i - 1].id]?.estrelas || 0) > 0;
+const faseLiberada = i => liberadaPara(aluno, FASES[i]);
+const faseAtual = () => FASES.find(f => liberadaPara(aluno, f) && !faseConcluida(aluno, f.id)) || null;
 
 /* ---------------- LOGIN ---------------- */
 // "entrar" só abre conta que já existe; "criar" só cria conta nova.
@@ -176,7 +188,7 @@ function iniciarLogin() {
       if (existente) { erroLogin('Já existe uma conta com esse nome nesta turma. Se é sua, use "Entrar" com a sua senha.', 'entrar'); return; }
       let id = chave, n = 2;
       while (dados.alunos[id]) id = `${chave}#${n++}`;
-      aluno = { id, nome, turma, pin, personagem: null, criadoEm: new Date().toISOString(), fases: {}, tentativas: [], conquistas: [], meta: null, maiorSequencia: 0, perfil: {} };
+      aluno = { id, nome, turma, pin, personagem: null, criadoEm: new Date().toISOString(), fases: {}, tentativas: [], conquistas: [], meta: null, maiorSequencia: 0, perfil: {}, compras: [], visual: {} };
       salvarAluno();
     }
     Store.sessao(aluno.id);
@@ -202,11 +214,12 @@ function abrirPersonagens() {
 }
 
 /* ---------------- TRILHA ---------------- */
-function abrirTrilha() {
+function abrirTrilha(opcoes = {}) {
   const p = personagem();
-  $('#topo-avatar').innerHTML = avatarSVG(p, 'topo');
+  $('#topo-avatar').innerHTML = avatarSVG(p, 'topo', aluno.visual);
   $('#topo-avatar').style.setProperty('--moldura', molduraDe(aluno));
   $('#topo-nome').textContent = nomePublico(aluno).split(' ')[0];
+  $('#topo-moedas').textContent = saldoMoedas(aluno);
   $('#topo-pontos').textContent = totalPontos(aluno);
   $('#topo-estrelas').textContent = totalEstrelas(aluno);
   const of = ofensiva(aluno);
@@ -216,61 +229,199 @@ function abrirTrilha() {
   desenharTrilha();
   desenharMetaResumo();
   mostrar('tela-trilha');
-  verificarResultadoLiga();
-  const atual = document.querySelector('.no.atual');
-  if (atual) setTimeout(() => atual.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+  // Comemorações pendentes: mundo concluído ou patente nova (inclui quem chegou lá antes desta versão).
+  setTimeout(verificarComemoracoes, 450);
+  const banner = opcoes.focoMundo && document.getElementById('mundo-' + opcoes.focoMundo);
+  const alvo = banner || document.querySelector('.no.atual');
+  if (banner) banner.classList.add('desbloqueando');
+  if (alvo) setTimeout(() => alvo.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+}
+
+/* ---------------- COMEMORAÇÕES (MUNDO NOVO E PATENTE NOVA) ----------------
+   Uma de cada vez: primeiro o mundo, depois a patente. Cada uma aparece só uma vez. */
+const mundosVistos = () => (Array.isArray(aluno.mundosVistos) ? aluno.mundosVistos : []);
+function mundoParaCelebrar() {
+  const vistos = mundosVistos();
+  const m = [...MUNDOS].reverse().find(x => faseConcluida(aluno, chefeDoMundo(x).id) && !vistos.includes(x.n));
+  return m ? m.n : 0;
+}
+const patenteVista = () => (Number.isInteger(aluno.patenteVista) ? aluno.patenteVista : 0);
+const patenteParaCelebrar = () => (patenteDe(aluno) > patenteVista() ? patenteDe(aluno) : 0);
+
+let comemoracaoAberta = false, timerCelebracao = null;
+function verificarComemoracoes() {
+  if (!aluno || comemoracaoAberta) return;
+  const mundo = mundoParaCelebrar();
+  if (mundo) { celebrarMundo(mundo); return; }
+  const patente = patenteParaCelebrar();
+  if (patente) celebrarPatente(patente);
+}
+
+const BRILHOS_CEL = [[8, 18, 0], [86, 14, 0.4], [14, 62, 0.8], [90, 56, 0.2], [30, 8, 1.1], [70, 84, 0.6], [6, 86, 1.3], [94, 88, 0.9]]
+  .map(([x, y, d]) => `<span class="cel-brilho" style="left:${x}%;top:${y}%;animation-delay:${(1.4 + d).toFixed(1)}s" aria-hidden="true">✦</span>`).join('');
+
+// Monta a tela de comemoração. "palco" é o desenho animado do meio.
+function abrirComemoracao({ cor, sub, palco, titulo, nome, texto, botao, aoIr }) {
+  comemoracaoAberta = true;
+  fecharModal();
+  clearTimeout(timerCelebracao);
+  const el = $('#celebracao');
+  el.style.setProperty('--cor', cor);
+  el.innerHTML = `
+    <div class="cel-raios" aria-hidden="true"></div>${BRILHOS_CEL}
+    <div class="cel-conteudo">
+      <p class="cel-sub">${sub}</p>
+      <div class="cel-palco" aria-hidden="true">${palco}
+        <span class="cel-avatar" style="--moldura:${molduraDe(aluno)}">${avatarSVG(personagem(), 'cel', aluno.visual)}</span>
+      </div>
+      <h2 class="cel-titulo" id="cel-titulo">${titulo}</h2>
+      <p class="cel-nome">${nome}</p>
+      <p class="cel-texto">${texto}</p>
+      <div class="cel-botoes">
+        <button class="btn btn-primario btn-grande" id="cel-ir">${botao}</button>
+        <button class="btn btn-texto" id="cel-fechar">Continuar</button>
+      </div>
+    </div>`;
+  el.hidden = false;
+  el.classList.remove('aberta');
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('aberta')));
+  setTimeout(confete, 1400);
+  setTimeout(confete, 2300);
+  setTimeout(() => $('#cel-ir')?.focus({ preventScroll: true }), 2300);
+  $('#cel-ir').onclick = () => { fecharCelebracao(); aoIr(); };
+  $('#cel-fechar').onclick = fecharCelebracao;
+}
+
+function celebrarMundo(n) {
+  const feito = MUNDOS[n - 1], novo = MUNDOS[n];
+  aluno.mundosVistos = [...new Set([...mundosVistos(), ...MUNDOS.filter(m => m.n <= n).map(m => m.n)])];
+  salvarAluno();
+  abrirComemoracao({
+    cor: (novo || feito).cor,
+    sub: `${feito.icone} Mundo ${feito.n} completo!`,
+    palco: `<svg class="cel-cadeado" viewBox="0 0 100 120">
+        <path class="cel-arco" d="M28 54 V38 a22 22 0 0 1 44 0 V54" fill="none" stroke="#e5e7eb" stroke-width="11" stroke-linecap="round"/>
+        <rect x="14" y="50" width="72" height="62" rx="14" fill="#fbbf24" stroke="#b45309" stroke-width="3"/>
+        <rect x="22" y="58" width="10" height="46" rx="5" fill="#fde68a" opacity=".7"/>
+        <circle cx="50" cy="76" r="7.5" fill="#78350f"/><rect x="46.5" y="78" width="7" height="17" rx="3.5" fill="#78350f"/>
+      </svg>
+      <span class="cel-mundo-icone">${novo ? novo.icone : '👑'}</span>`,
+    titulo: novo ? 'Novo mundo desbloqueado!' : 'Trilha completa!',
+    nome: novo ? `Mundo ${novo.n}: ${esc(novo.nome)}` : 'Você é uma lenda do dinheiro!',
+    texto: novo ? `${novo.fases.length} fases novas esperam por você: ${esc(novo.chamada)}` : 'Você concluiu os 3 mundos! Agora tente ganhar 3 estrelas em todas as fases.',
+    botao: novo ? `Ir para o Mundo ${novo.n} 🚀` : 'Ver minha trilha 🗺️',
+    aoIr: () => abrirTrilha({ focoMundo: novo ? novo.n : feito.n }),
+  });
+}
+
+function celebrarPatente(n) {
+  const antes = patenteVista(), info = infoPatente(aluno), P = PATENTES[n];
+  aluno.patenteVista = n;
+  salvarAluno();
+  abrirComemoracao({
+    cor: P.cor,
+    sub: '🎖️ Nova patente!',
+    palco: `<span class="pat-velha">${escudoPatente(antes)}</span><span class="pat-nova">${escudoPatente(n)}</span>`,
+    titulo: 'Você subiu de patente!',
+    nome: `${PATENTES[antes].nome} → ${P.nome}`,
+    texto: info.prox
+      ? `Você já tem ${info.xp} XP. Faltam ${info.falta} XP para a Patente ${info.prox.nome}. Continue jogando!`
+      : `Você tem ${info.xp} XP e chegou à patente mais alta do jogo! 💎`,
+    botao: 'Ver as patentes 🛡️',
+    aoIr: () => { abaRanking = 'patente'; abrirRanking(); },
+  });
+}
+
+function fecharCelebracao() {
+  const el = $('#celebracao');
+  if (el.hidden || !comemoracaoAberta) return;
+  comemoracaoAberta = false;
+  el.classList.remove('aberta');
+  timerCelebracao = setTimeout(() => { el.hidden = true; el.innerHTML = ''; }, 300);
+  setTimeout(verificarComemoracoes, 450);   // tem outra esperando? (ex.: patente depois do mundo)
+}
+
+// Atalhos para cada mundo no alto da trilha.
+function desenharMundosNav() {
+  $('#mundos-nav').innerHTML = MUNDOS.map(m => {
+    const st = statusMundo(aluno, m);
+    return `<button class="mundo-chip ${st.bloqueado ? 'bloqueado' : ''} ${st.feitas === m.fases.length ? 'completo' : ''}" data-mundo="${m.n}" style="--cor:${m.cor}">
+      <span aria-hidden="true">${st.bloqueado ? '🔒' : m.icone}</span><b>Mundo ${m.n}</b><small>${st.feitas}/${m.fases.length}</small></button>`;
+  }).join('');
+  $('#mundos-nav').onclick = e => {
+    const b = e.target.closest('[data-mundo]');
+    if (b) document.getElementById('mundo-' + b.dataset.mundo)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
 }
 
 function desenharTrilha() {
+  desenharMundosNav();
   const mapa = $('#mapa');
-  const ESP = 165, TOPO = 70;
-  const xs = FASES.map((_, i) => 50 + 22 * Math.sin(i * 1.15));
-  const ys = FASES.map((_, i) => TOPO + i * ESP);
-  const altura = TOPO + (FASES.length - 1) * ESP + 90;
+  const ESP = 170, CABECALHO = 250, FIM_MUNDO = 95;
+  const atual = faseAtual();
+  const pos = {};
+  let faixas = '', banners = '', extras = '', y = 0;
+
+  MUNDOS.forEach(m => {
+    const topo = y, st = statusMundo(aluno, m);
+    const linhas = [];
+    m.fases.forEach(f => (linhas[f.linha] ||= []).push(f));
+    let yl = topo + CABECALHO, ultima = yl, k = 0;
+    linhas.filter(Boolean).forEach((fs, idx, arr) => {
+      fs.forEach(f => { pos[f.id] = { x: f.lado === 'c' ? 50 + 18 * Math.sin(f.linha * 1.15) : f.lado === 'e' ? 27 : 73, y: yl }; });
+      const xDecor = fs.length === 2 ? 50 : pos[fs[0].id].x > 50 ? 12 : 88;
+      extras += `<span class="decor" style="left:${xDecor}%;top:${yl - 10}px">${m.decor[k++ % m.decor.length]}</span>`;
+      if (fs.length === 2 && idx > 0 && arr[idx - 1].length === 1) extras += `<span class="bifurcacao" style="top:${yl - ESP / 2}px">🔀 escolha</span>`;
+      ultima = yl; yl += ESP;
+    });
+    const fim = ultima + FIM_MUNDO;
+    const anterior = MUNDOS[m.n - 2];
+    faixas += `<div class="mundo-faixa" style="top:${topo}px;height:${fim - topo}px;--faixa:${m.faixa}"></div>`;
+    banners += `<div class="mundo-banner ${st.bloqueado ? 'bloqueado' : ''}" id="mundo-${m.n}" style="top:${topo + 22}px;--cor:${m.cor}">
+      <span class="mb-icone" aria-hidden="true">${st.bloqueado ? '🔒' : m.icone}</span>
+      <span class="mb-texto"><small>Mundo ${m.n}</small><b>${esc(m.nome)}</b>
+        <span class="mb-prog">${st.bloqueado && anterior ? `Conclua o ${esc(chefeDoMundo(anterior).nome)} para entrar` : `${st.feitas}/${m.fases.length} fases · ⭐ ${st.estrelas}/${m.fases.length * 3}`}</span>
+        <span class="barra"><i style="width:${st.feitas / m.fases.length * 100}%"></i></span></span>
+      ${st.feitas === m.fases.length ? '<span class="mb-ok" aria-label="Mundo completo">✅</span>' : ''}</div>`;
+    y = fim;
+  });
+  const altura = y + 70;
   mapa.style.height = altura + 'px';
 
-  let indiceAtual = FASES.findIndex((f, i) => faseLiberada(i) && !(aluno.fases[f.id]?.estrelas > 0));
-  if (indiceAtual === -1) indiceAtual = FASES.length - 1;
+  // Caminhos: tracejado onde ainda não passou, dourado onde já passou.
+  let base = '', feito = '';
+  FASES.forEach(f => f.liga.forEach(id => {
+    const a = pos[id], b = pos[f.id], my = (a.y + b.y) / 2;
+    const d = `M ${a.x} ${a.y} C ${a.x} ${my}, ${b.x} ${my}, ${b.x} ${b.y}`;
+    base += `<path d="${d}" class="caminho-base"/>`;
+    if (faseConcluida(aluno, id) && liberadaPara(aluno, f)) feito += `<path d="${d}" class="caminho-feito"/>`;
+  }));
 
-  const caminho = (ate) => {
-    let d = `M ${xs[0]} ${ys[0]}`;
-    for (let i = 1; i <= ate; i++) {
-      const my = (ys[i - 1] + ys[i]) / 2;
-      d += ` C ${xs[i - 1]} ${my}, ${xs[i]} ${my}, ${xs[i]} ${ys[i]}`;
-    }
-    return d;
-  };
-
-  const decor = ['🌴', '🦀', '🌺', '🌿', '🐚', '🦋', '🌊', '🍃', '🥥', '🌻', '🪶'];
-  let html = `<svg class="caminho" viewBox="0 0 100 ${altura}" preserveAspectRatio="none">
-      <path d="${caminho(FASES.length - 1)}" class="caminho-base"/>
-      <path d="${caminho(indiceAtual)}" class="caminho-feito"/>
-    </svg>`;
-
+  let nos = '';
   FASES.forEach((f, i) => {
-    const prog = aluno.fases[f.id];
-    const liberada = faseLiberada(i);
-    const concluida = prog?.estrelas > 0;
-    const estado = !liberada ? 'bloqueada' : (i === indiceAtual && !concluida ? 'atual' : (concluida ? 'concluida' : 'liberada'));
+    const prog = aluno.fases[f.id], p = pos[f.id];
+    const liberada = liberadaPara(aluno, f), concluida = faseConcluida(aluno, f.id);
+    const estado = !liberada ? 'bloqueada' : f === atual ? 'atual' : concluida ? 'concluida' : 'liberada';
     const estrelas = prog ? '★'.repeat(prog.estrelas) + '☆'.repeat(3 - prog.estrelas) : '☆☆☆';
-    const ladoDecor = xs[i] > 50 ? 12 : 82;
-    html += `
-      <span class="decor" style="left:${ladoDecor}%;top:${ys[i] - 10}px">${decor[i % decor.length]}</span>
-      <div class="no-wrap" style="left:${xs[i]}%;top:${ys[i]}px">
+    nos += `
+      <div class="no-wrap ${f.lado !== 'c' ? 'ramo' : ''} ${f.final ? 'chefe' : ''}" style="left:${p.x}%;top:${p.y}px">
         ${estado === 'atual' ? `<span class="avatar-trilha">${avatar('trilha')}</span>` : ''}
-        <button class="no ${estado}" data-i="${i}" style="--cor:${f.cor}" aria-label="Fase ${i + 1}: ${esc(f.nome)}">
+        <button class="no ${estado}" data-i="${i}" style="--cor:${f.cor}" aria-label="Fase ${i + 1}: ${esc(f.nome)}${liberada ? '' : ' (bloqueada)'}">
           <span>${liberada ? f.icone : '🔒'}</span>
         </button>
         <div class="no-rotulo"><b>${i + 1}. ${esc(f.nome)}</b><span class="estrelas">${estrelas}</span></div>
       </div>`;
   });
-  html += `<div class="chegada" style="top:${altura - 40}px">🏁 Chegada</div>`;
-  mapa.innerHTML = html;
+
+  mapa.innerHTML = `${faixas}
+    <svg class="caminho" viewBox="0 0 100 ${altura}" preserveAspectRatio="none">${base}${feito}</svg>
+    ${extras}${banners}${nos}
+    <div class="chegada" style="top:${altura - 50}px">🏁 Chegada</div>`;
 
   mapa.onclick = e => {
     const b = e.target.closest('.no'); if (!b) return;
     const i = +b.dataset.i;
-    if (!faseLiberada(i)) { toast('🔒 Conclua a fase anterior para liberar esta!'); return; }
+    if (!faseLiberada(i)) { toast(motivoBloqueio(aluno, FASES[i])); return; }
     abrirDetalheFase(i);
   };
 }
@@ -278,15 +429,22 @@ function desenharTrilha() {
 function abrirDetalheFase(i) {
   const f = FASES[i];
   const prog = aluno.fases[f.id];
-  const qtd = f.final ? QUESTOES_FINAL : QUESTOES_POR_FASE;
+  const qtd = qtdQuestoes(f);
+  const m = MUNDOS[f.mundo - 1];
+  const extra = f.final ? `<li>🏆 Desafio do Mundo ${f.mundo}: vale moedas em dobro!</li>`
+    : f.lado !== 'c' ? '<li>🔀 Caminho à sua escolha: o outro lado pode ser feito depois</li>' : '';
+  const tipos = f.final ? FASES.filter(g => g.mundo === f.mundo && !g.final).reduce((s, g) => s + g.geradores.length, 0) : f.geradores.length;
   abrirModal(`
     <div class="detalhe-fase" style="--cor:${f.cor}">
       <div class="detalhe-icone">${f.icone}</div>
+      <p class="detalhe-mundo">${m.icone} Mundo ${m.n} · ${esc(m.nome)}</p>
       <h2>Fase ${i + 1}: ${esc(f.nome)}</h2>
       <p>${esc(f.desc)}</p>
       <ul class="regras">
-        <li>📝 ${qtd} questões sorteadas só para você</li>
+        <li>📝 ${qtd} questões sorteadas entre ${tipos} tipos diferentes${f.semFacil ? ' (só médias e difíceis)' : ''}</li>
         <li>⭐ Acerte ${qtd - 2} ou mais para avançar</li>
+        <li>${ICONE_MOEDA} ${premioPrevisto(f, prog)}</li>
+        ${extra}
         <li>🔁 Pode tentar de novo quantas vezes quiser (vale a melhor pontuação)</li>
       </ul>
       ${prog ? `<p class="recorde">Seu recorde: <b>${prog.melhorAcertos}/${qtd}</b> · ${prog.melhorPontos} pts · ${'★'.repeat(prog.estrelas)}${'☆'.repeat(3 - prog.estrelas)}</p>` : ''}
@@ -377,7 +535,10 @@ function finalizarQuiz() {
     tentativas: anterior.tentativas + 1,
   };
   aluno.maiorSequencia = Math.max(aluno.maiorSequencia || 0, quiz.maiorSeq);
-  aluno.tentativas.push({ faseId: fase.id, fase: fase.nome, data: new Date().toISOString(), acertos, total, pontos, estrelas, respostas: quiz.respostas.map(({ visual, ...r }) => r) });
+  const tentativa = { faseId: fase.id, fase: fase.nome, data: new Date().toISOString(), acertos, total, pontos, estrelas, respostas: quiz.respostas.map(({ visual, ...r }) => r) };
+  aluno.tentativas.push(tentativa);
+  const extrato = calcularMoedas(aluno);
+  const moedas = extrato.detalhes.get(tentativa) || { moedas: 0, partes: [] };
 
   let msgMeta = '';
   if (estrelas > 0 && aluno.meta && aluno.meta.guardado < aluno.meta.preco) {
@@ -386,14 +547,22 @@ function finalizarQuiz() {
     msgMeta = `<p class="msg-meta">🐷 +1 semana de economia simulada: +${brl(aluno.meta.porSemana)} no cofrinho da meta!</p>`;
   }
 
-  const novas = verificarConquistas(estrelas, acertos, total, fase);
+  const novas = verificarConquistas(estrelas, acertos, total, fase, extrato.saldo);
   salvarAluno();
 
-  const proxima = FASES[i + 1];
+  const proximas = estrelas > 0 ? proximasFases(fase) : [];
   const p = personagem();
-  const nivelLiga = ligaDe(aluno);
+  const pat = infoPatente(aluno);
+  const mundoNovo = fase.final && estrelas > 0 && !anterior.estrelas;
+  const seguinte = MUNDOS[fase.mundo];
+  const blocoMoedas = moedas.moedas ? `
+    <div class="res-moedas">
+      <div class="rm-topo">${ICONE_MOEDA}<b>+${moedas.moedas}</b><span>moedas</span></div>
+      <ul>${moedas.partes.map(([t, v]) => `<li><span>${esc(t)}</span><b>+${v}</b></li>`).join('')}</ul>
+      <button class="btn btn-texto" id="res-loja">🛍️ Ir para a lojinha · você tem ${extrato.saldo} moedas</button>
+    </div>` : '';
   $('#resultado-conteudo').innerHTML = `
-    <div class="res-personagem ${estrelas ? 'pula' : ''}">${avatarSVG(p, 'resultado')}</div>
+    <div class="res-personagem ${estrelas ? 'pula' : ''}">${avatarSVG(p, 'resultado', aluno.visual)}</div>
     <h2>${estrelas === 3 ? 'Perfeito!' : estrelas > 0 ? 'Fase concluída!' : 'Quase lá!'}</h2>
     <div class="res-estrelas">${[1, 2, 3].map(n => `<span class="${n <= estrelas ? 'on' : ''}" style="animation-delay:${n * 0.25}s">★</span>`).join('')}</div>
     <div class="res-numeros">
@@ -401,28 +570,45 @@ function finalizarQuiz() {
       <div><b>${pontos}</b><small>pontos</small></div>
       <div><b>${quiz.maiorSeq}</b><small>maior sequência</small></div>
     </div>
-    <button class="res-liga" id="res-liga">${escudoLiga(nivelLiga)}<span><b>+${pontos} XP</b> · ${posicaoNaLiga(aluno)}º lugar na Liga ${LIGAS[nivelLiga].nome}</span></button>
+    <button class="res-liga" id="res-liga">${escudoPatente(pat.n)}<span><b>+${pontos} XP</b> · Patente ${pat.atual.nome}${pat.prox ? ` · faltam ${pat.falta} XP para ${pat.prox.nome}` : ''}</span></button>
     ${recorde && anterior.tentativas > 0 ? '<p class="recorde">🎉 Novo recorde nesta fase!</p>' : ''}
-    ${estrelas === 0 ? `<p>Você precisa de ${total - 2} acertos para avançar. As questões serão novas na próxima tentativa!</p>` : ''}
+    ${estrelas === 0 ? `<p>Você precisa de ${total - 2} acertos para avançar e ganhar moedas. As questões serão novas na próxima tentativa!</p>` : ''}
+    ${mundoNovo ? `<div class="res-mundo">${seguinte ? `🎉 Você abriu o <b>Mundo ${seguinte.n}: ${esc(seguinte.nome)}</b> ${seguinte.icone}` : '🏁 Você completou a trilha inteira! Que orgulho!'}</div>` : ''}
+    ${blocoMoedas}
     ${msgMeta}
     ${novas.length ? `<div class="novas-conquistas"><h3>Conquistas desbloqueadas</h3>${novas.map(c => `<div class="conquista on"><span>${c.icone}</span><div><b>${c.nome}</b><small>${c.desc}</small></div></div>`).join('')}</div>` : ''}
     <details class="revisao"><summary>Revisar minhas respostas</summary>
       ${quiz.respostas.map((r, n) => `<div class="rev-item ${r.acertou ? 'ok' : 'erro'}"><b>${n + 1}. ${r.acertou ? '✅' : '❌'}</b> ${esc(r.enunciado).replace(/\n/g, '<br>')}${r.visual ? `<div class="rev-visual">${r.visual}</div>` : ''}<br><small>Sua resposta: ${esc(r.resposta)}${r.acertou ? '' : ` · Certa: ${esc(r.correta)}`}</small></div>`).join('')}
     </details>
     <div class="res-botoes">
-      ${estrelas > 0 && proxima ? `<button class="btn btn-primario btn-grande" id="res-proxima">Próxima fase ${proxima.icone}</button>` : ''}
-      <button class="btn ${estrelas > 0 && proxima ? 'btn-secundario' : 'btn-primario'} btn-grande" id="res-repetir">Tentar de novo (questões novas)</button>
+      ${proximas.length > 1 ? '<p class="res-escolha">🔀 Escolha seu caminho:</p>' : ''}
+      ${proximas.map((f, k) => `<button class="btn ${k ? 'btn-secundario' : 'btn-primario'} btn-grande" data-prox="${f.id}">${proximas.length > 1 ? '' : 'Próxima: '}${f.icone} ${esc(f.nome)}</button>`).join('')}
+      <button class="btn ${proximas.length ? 'btn-secundario' : 'btn-primario'} btn-grande" id="res-repetir">Tentar de novo (questões novas)</button>
       <button class="btn btn-texto" id="res-trilha">Voltar à trilha</button>
     </div>`;
   mostrar('tela-resultado');
   if (estrelas > 0) confete();
+  setTimeout(verificarComemoracoes, 1100);   // mundo novo e/ou patente nova
   $('#res-repetir').onclick = () => iniciarQuiz(i);
   $('#res-trilha').onclick = () => abrirTrilha();
-  $('#res-liga').onclick = () => { abaRanking = 'liga'; abrirRanking(); };
-  if ($('#res-proxima')) $('#res-proxima').onclick = () => { abrirTrilha(); setTimeout(() => abrirDetalheFase(i + 1), 400); };
+  $('#res-liga').onclick = () => { abaRanking = 'patente'; abrirRanking(); };
+  if ($('#res-loja')) $('#res-loja').onclick = abrirLoja;
+  document.querySelectorAll('[data-prox]').forEach(b => b.onclick = () => {
+    const k = FASES.findIndex(f => f.id === b.dataset.prox);
+    abrirTrilha(); setTimeout(() => abrirDetalheFase(k), 400);
+  });
 }
 
-function verificarConquistas(estrelas, acertos, total, fase) {
+// Depois de concluir uma fase: as fases que ela abriu (até 2, numa bifurcação).
+// Se não abriu nenhuma, sugere a primeira fase liberada que ainda falta.
+function proximasFases(fase) {
+  const filhas = FASES.filter(f => f.liga.includes(fase.id) && liberadaPara(aluno, f) && !faseConcluida(aluno, f.id));
+  if (filhas.length) return filhas.slice(0, 2);
+  const atual = faseAtual();
+  return atual ? [atual] : [];
+}
+
+function verificarConquistas(estrelas, acertos, total, fase, saldo = 0) {
   const ganhar = [];
   const add = id => { if (!aluno.conquistas.includes(id)) { aluno.conquistas.push(id); ganhar.push(CONQUISTAS.find(c => c.id === id)); } };
   if (estrelas > 0) add('primeiro');
@@ -433,10 +619,25 @@ function verificarConquistas(estrelas, acertos, total, fase) {
   if (fase.id === 'f10' && estrelas > 0) add('graficos');
   if (fase.id === 'f11' && estrelas > 0) add('consciente');
   if (fasesConcluidas(aluno) >= 6) add('metade');
-  if (fasesConcluidas(aluno) === FASES.length) add('trilha');
+  if (fasesConcluidas(aluno) >= 20) add('fases20');
+  if (mundoCompleto(aluno, MUNDOS[0])) add('trilha');
+  if (mundoCompleto(aluno, MUNDOS[1])) add('mundo2');
+  if (mundoCompleto(aluno, MUNDOS[2])) add('mundo3');
+  if (FASES.every(f => (aluno.fases[f.id]?.estrelas || 0) === 3)) add('lenda');
+  if (BIFURCACOES.some(par => par.every(id => faseConcluida(aluno, id)))) add('explorador');
   if (totalEstrelas(aluno) >= 20) add('estrelas');
+  if (totalEstrelas(aluno) >= 60) add('estrelas60');
+  if (saldo >= 300) add('poupador');
   if (aluno.meta && aluno.meta.guardado >= aluno.meta.preco) add('metaok');
   return ganhar;
+}
+
+// Conquistas ganhas fora de uma fase (na lojinha, por exemplo).
+function darConquista(id) {
+  if (aluno.conquistas.includes(id)) return;
+  const c = CONQUISTAS.find(x => x.id === id); if (!c) return;
+  aluno.conquistas.push(id); salvarAluno();
+  toast(`${c.icone} Conquista: ${esc(c.nome)}!`);
 }
 
 function confete() {
@@ -616,6 +817,7 @@ function resumoAluno(a) {
     nome: a.nome, turma: a.turma, personagem: (personagemDe(a.personagem) || {}).nome || '-',
     pontos: totalPontos(a), estrelas: totalEstrelas(a), fases: fasesConcluidas(a), tentativas: a.tentativas.length,
     respondidas: resp.length, acertos, taxa: resp.length ? Math.round(acertos / resp.length * 100) : 0,
+    moedas: calcularMoedas(a).saldo, itens: comprasDe(a).length, xp: xpTotal(a), patente: PATENTES[patenteDe(a)].nome,
     conquistas: a.conquistas.length, meta: a.meta ? `${a.meta.produto} - ${brl(a.meta.preco)}${a.meta.tipo ? ' - ' + a.meta.tipo : ''} (${Math.round(a.meta.guardado / a.meta.preco * 100)}%)` : '-',
   };
 }
@@ -674,8 +876,8 @@ function renderPainel() {
     ${porFase.map(p => `<tr><td>${p.f.icone} ${esc(p.f.nome)}</td><td>${p.concl}/${lista.length}</td><td>${p.tentativas}</td><td>${p.media}${p.media === '-' ? '' : '%'}</td></tr>`).join('')}</tbody></table>`;
 
   // Alunos
-  $('#tabela-alunos').innerHTML = resumos.length ? `<table><thead><tr><th>#</th><th>Estudante</th><th>Turma</th><th>Pontos</th><th>★</th><th>Fases</th><th>Tentativas</th><th>% acerto</th><th>Meta</th></tr></thead><tbody>
-    ${resumos.map((r, n) => `<tr class="clicavel" data-id="${esc(lista.find(a => a.nome === r.nome && a.turma === r.turma).id)}"><td>${n + 1}</td><td>${esc(r.nome)}</td><td>${esc(r.turma)}</td><td>${r.pontos}</td><td>${r.estrelas}</td><td>${r.fases}/${FASES.length}</td><td>${r.tentativas}</td><td>${r.taxa}%</td><td>${esc(r.meta)}</td></tr>`).join('')}
+  $('#tabela-alunos').innerHTML = resumos.length ? `<table><thead><tr><th>#</th><th>Estudante</th><th>Turma</th><th>Pontos</th><th>★</th><th>Fases</th><th>Tentativas</th><th>% acerto</th><th>XP</th><th>Patente</th><th>Moedas</th><th>Meta</th></tr></thead><tbody>
+    ${resumos.map((r, n) => `<tr class="clicavel" data-id="${esc(lista.find(a => a.nome === r.nome && a.turma === r.turma).id)}"><td>${n + 1}</td><td>${esc(r.nome)}</td><td>${esc(r.turma)}</td><td>${r.pontos}</td><td>${r.estrelas}</td><td>${r.fases}/${FASES.length}</td><td>${r.tentativas}</td><td>${r.taxa}%</td><td>${r.xp}</td><td>${r.patente}</td><td>${r.moedas}</td><td>${esc(r.meta)}</td></tr>`).join('')}
     </tbody></table>` : `<p class="vazio">Nenhum estudante cadastrado ${Banco.ativo ? 'no banco' : 'neste aparelho'} ainda.</p>`;
   $('#tabela-alunos').onclick = e => { const tr = e.target.closest('tr.clicavel'); if (tr) abrirHistorico(tr.dataset.id); };
 }
@@ -728,8 +930,8 @@ const csv = linhas => '﻿' + linhas.map(l => l.map(csvCel).join(';')).join('\r\
 const hoje = () => new Date().toISOString().slice(0, 10);
 
 function exportarResumo() {
-  const linhas = [['Estudante', 'Turma', 'Personagem', 'Pontos', 'Estrelas', 'Fases concluídas', 'Tentativas', 'Questões respondidas', 'Acertos', '% acerto', 'Conquistas', 'Meta']];
-  alunosFiltrados().map(resumoAluno).forEach(r => linhas.push([r.nome, r.turma, r.personagem, r.pontos, r.estrelas, r.fases, r.tentativas, r.respondidas, r.acertos, r.taxa, r.conquistas, r.meta]));
+  const linhas = [['Estudante', 'Turma', 'Personagem', 'Pontos', 'Estrelas', 'Fases concluídas', 'Tentativas', 'Questões respondidas', 'Acertos', '% acerto', 'Conquistas', 'XP total', 'Patente', 'Moedas', 'Itens comprados', 'Meta']];
+  alunosFiltrados().map(resumoAluno).forEach(r => linhas.push([r.nome, r.turma, r.personagem, r.pontos, r.estrelas, r.fases, r.tentativas, r.respondidas, r.acertos, r.taxa, r.conquistas, r.xp, r.patente, r.moedas, r.itens, r.meta]));
   baixar(`resumo-estudantes-${hoje()}.csv`, csv(linhas), 'text/csv;charset=utf-8');
 }
 
@@ -775,6 +977,9 @@ function importarBackup(arquivo) {
           atual.fases[fid] = g ? { melhorPontos: Math.max(g.melhorPontos, f.melhorPontos), melhorAcertos: Math.max(g.melhorAcertos, f.melhorAcertos), estrelas: Math.max(g.estrelas, f.estrelas), tentativas: Math.max(g.tentativas, f.tentativas) } : f;
         });
         atual.maiorSequencia = Math.max(atual.maiorSequencia || 0, a.maiorSequencia || 0);
+        // Itens da lojinha: junta os dois lados sem repetir o mesmo item.
+        const itens = new Set((atual.compras || []).map(c => c.item));
+        (Array.isArray(a.compras) ? a.compras : []).forEach(c => { if (c?.item && !itens.has(c.item)) { (atual.compras ||= []).push(c); itens.add(c.item); } });
       });
       Store.salvar(dados);
       toast(`✅ Importado: ${adicionados} novos, ${mesclados} mesclados.`);
@@ -828,15 +1033,17 @@ document.addEventListener('DOMContentLoaded', () => {
   iniciarLogin();
   iniciarPainel();
   iniciarRanking();
+  iniciarLoja();
   $('#btn-trocar-personagem').onclick = abrirPerfil;
+  $('#topo-moedas-btn').onclick = abrirLoja;
   $('#nav-inferior').onclick = e => {
     const b = e.target.closest('[data-ir]'); if (!b || !aluno) return;
-    ({ trilha: abrirTrilha, ranking: abrirRanking, perfil: abrirPerfil })[b.dataset.ir]();
+    ({ trilha: abrirTrilha, loja: abrirLoja, ranking: abrirRanking, perfil: abrirPerfil })[b.dataset.ir]();
   };
   $('#quiz-sair').onclick = () => { if (confirm('Sair da fase? O progresso desta tentativa será perdido.')) abrirTrilha(); };
   $('#modal').onclick = e => { if (e.target.id === 'modal') fecharModal(); };
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') fecharModal();
+    if (e.key === 'Escape') { fecharModal(); fecharCelebracao(); }
     if ($('#tela-quiz').classList.contains('ativa') && !$('#quiz-feedback').classList.contains('aberto')) {
       const k = ['1', '2', '3', '4'].indexOf(e.key);
       if (k >= 0) responder(k);

@@ -1,23 +1,23 @@
 /* =========================================================
-   RANKING — XP semanal, ofensiva e ligas (no estilo Duolingo)
+   RANKING — XP, ofensiva, nível e patentes.
    Tudo é calculado a partir das tentativas salvas. Assim o
    resultado é o mesmo em qualquer aparelho que tenha os dados,
    inclusive depois de a professora importar backups.
    ========================================================= */
 
-const LIGAS = [
-  { nome: 'Bronze', cor: '#b8692e', cor2: '#f0b27a' },
-  { nome: 'Prata', cor: '#7b8aa0', cor2: '#dde3ea' },
-  { nome: 'Ouro', cor: '#d18e00', cor2: '#fde68a' },
-  { nome: 'Safira', cor: '#1d5fd1', cor2: '#93c0ff' },
-  { nome: 'Rubi', cor: '#c81e4a', cor2: '#ff9bb3' },
-  { nome: 'Esmeralda', cor: '#0d8f50', cor2: '#86efb8' },
-  { nome: 'Ametista', cor: '#7c3aed', cor2: '#d4bcff' },
-  { nome: 'Pérola', cor: '#b38f8a', cor2: '#fff4ef' },
-  { nome: 'Obsidiana', cor: '#27272a', cor2: '#8a8a94' },
-  { nome: 'Diamante', cor: '#0891b2', cor2: '#b9f6ff' },
+/* Patentes: sobem na hora em que o estudante junta o XP total pedido e nunca descem. */
+const PATENTES = [
+  { nome: 'Bronze', xp: 0, cor: '#b8692e', cor2: '#f0b27a' },
+  { nome: 'Prata', xp: 100, cor: '#7b8aa0', cor2: '#dde3ea' },
+  { nome: 'Ouro', xp: 300, cor: '#d18e00', cor2: '#fde68a' },
+  { nome: 'Safira', xp: 600, cor: '#1d5fd1', cor2: '#93c0ff' },
+  { nome: 'Rubi', xp: 1000, cor: '#c81e4a', cor2: '#ff9bb3' },
+  { nome: 'Esmeralda', xp: 1500, cor: '#0d8f50', cor2: '#86efb8' },
+  { nome: 'Ametista', xp: 2100, cor: '#7c3aed', cor2: '#d4bcff' },
+  { nome: 'Pérola', xp: 2800, cor: '#b38f8a', cor2: '#fff4ef' },
+  { nome: 'Obsidiana', xp: 3600, cor: '#27272a', cor2: '#8a8a94' },
+  { nome: 'Diamante', xp: 4500, cor: '#0891b2', cor2: '#b9f6ff' },
 ];
-const XP_MIN_PROMOCAO = 50;
 const DIAS_CURTOS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 const CORES_MOLDURA = ['#14b8a6', '#3b82f6', '#8b5cf6', '#ec4899', '#ef4444', '#f97316', '#eab308', '#22c55e', '#0f172a'];
 
@@ -29,7 +29,7 @@ function somarDias(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); re
 const chaveSemana = d => chaveDia(inicioSemana(d));
 
 /* ---------------- XP, OFENSIVA E NÍVEL ---------------- */
-// XP = soma dos pontos de TODAS as tentativas (repetir fase também vale, como no Duolingo)
+// XP = soma dos pontos de TODAS as tentativas (repetir fase também vale)
 // mais o XP bônus dado pela professora (que não é partida e não conta como dia de ofensiva).
 const bonusDe = a => (Array.isArray(a.bonusXp) ? a.bonusXp : []).filter(b => b && Number.isFinite(+b.pontos) && b.data);
 const ganhosXP = a => [...a.tentativas.map(t => ({ data: t.data, pontos: t.pontos || 0 })), ...bonusDe(a).map(b => ({ data: b.data, pontos: +b.pontos }))];
@@ -71,90 +71,22 @@ function nivelDe(xp) {
   return { n, pct: (xp - base) / (prox - base) * 100, falta: prox - xp };
 }
 
-/* ---------------- IDENTIDADE PÚBLICA ---------------- */
-function nomePublico(a) {
-  const apelido = (a.perfil?.apelido || '').trim();
-  if (apelido) return apelido;
-  const partes = a.nome.trim().split(/\s+/);
-  return partes.length > 1 ? `${partes[0]} ${partes[partes.length - 1][0]}.` : partes[0];
+/* ---------------- PATENTES ---------------- */
+function patentePorXP(xp) {
+  let n = 0;
+  PATENTES.forEach((p, i) => { if (xp >= p.xp) n = i; });
+  return n;
 }
-const molduraDe = a => CORES_MOLDURA.includes(a.perfil?.moldura) ? a.perfil.moldura : CORES_MOLDURA[0];
-function avatarAluno(a, classe = '') {
-  const p = personagemDe(a.personagem) || PERSONAGENS[0];
-  return `<span class="av-moldura" style="--moldura:${molduraDe(a)}">${avatarSVG(p, classe)}</span>`;
-}
+const patenteDe = a => patentePorXP(xpTotal(a));
 
-/* ---------------- LIGAS ---------------- */
-const ordenarXP = (x, y) => y.xp - x.xp || x.a.nome.localeCompare(y.a.nome, 'pt-BR');
-
-// Quantos sobem e quantos descem, conforme o tamanho do grupo.
-function regrasZona(n) {
-  return { sobe: Math.max(1, Math.min(5, Math.round(n * 0.3))), desce: n >= 5 ? Math.min(5, Math.floor(n * 0.2)) : 0 };
+// Patente atual, a próxima e quanto falta para ela.
+function infoPatente(a) {
+  const xp = xpTotal(a), n = patentePorXP(xp), atual = PATENTES[n], prox = PATENTES[n + 1] || null;
+  return { xp, n, atual, prox, falta: prox ? prox.xp - xp : 0, pct: prox ? (xp - atual.xp) / (prox.xp - atual.xp) * 100 : 100 };
 }
 
-// Diz se a posição sobe (1), desce (-1) ou fica (0), com as mesmas regras do fechamento da semana.
-function destinoNaLiga(nivel, pos, xp, n) {
-  const z = regrasZona(n);
-  if (pos < z.sobe && xp >= XP_MIN_PROMOCAO && nivel < LIGAS.length - 1) return 1;
-  if (nivel > 0 && (xp === 0 || pos >= n - z.desce)) return -1;
-  return 0;
-}
-
-function inicioDoAluno(a) {
-  const datas = [Date.parse(a.criadoEm), ...a.tentativas.map(t => Date.parse(t.data))].filter(Number.isFinite);
-  return new Date(datas.length ? Math.min(...datas) : Date.now());
-}
-
-// Recalcula, semana por semana, em que liga cada estudante está.
-let cacheLigas = null;
-function calcularLigas() {
-  const alunos = alunosRanking();
-  const atual = chaveSemana(new Date());
-  const assinatura = `${atual}|${rankingVersao}|${alunos.length}|${alunos.reduce((s, a) => s + a.tentativas.length + bonusDe(a).length, 0)}`;
-  if (cacheLigas?.assinatura === assinatura) return cacheLigas;
-
-  const liga = {}, resultado = {}, xps = {}, inicios = {};
-  alunos.forEach(a => { liga[a.id] = 0; xps[a.id] = xpPorSemana(a); inicios[a.id] = inicioDoAluno(a); });
-  if (alunos.length) {
-    let w = inicioSemana(new Date(Math.min(...alunos.map(a => +inicios[a.id]))));
-    while (chaveDia(w) < atual) {
-      const k = chaveDia(w), fim = somarDias(w, 7), grupos = {};
-      alunos.filter(a => inicios[a.id] < fim).forEach(a => (grupos[liga[a.id]] ||= []).push(a));
-      Object.entries(grupos).forEach(([nv, lista]) => {
-        const nivel = +nv;
-        const ord = lista.map(a => ({ a, xp: xps[a.id][k] || 0 })).sort(ordenarXP);
-        ord.forEach(({ a, xp }, pos) => {
-          const para = nivel + destinoNaLiga(nivel, pos, xp, ord.length);
-          liga[a.id] = para;
-          resultado[a.id] = { semana: k, posicao: pos + 1, de: nivel, para, xp };
-        });
-      });
-      w = fim;
-    }
-  }
-  return (cacheLigas = { assinatura, liga, resultado });
-}
-
-const ligaDe = a => calcularLigas().liga[a.id] ?? 0;
-
-function grupoLiga(nivel) {
-  const { liga } = calcularLigas();
-  const semana = chaveSemana(new Date());
-  return alunosRanking()
-    .filter(a => (liga[a.id] ?? 0) === nivel)
-    .map(a => ({ a, xp: xpDaSemana(a, semana) }))
-    .sort(ordenarXP);
-}
-const posicaoNaLiga = a => grupoLiga(ligaDe(a)).findIndex(g => g.a.id === a.id) + 1;
-
-function tempoRestante() {
-  const ms = somarDias(inicioSemana(new Date()), 7) - Date.now();
-  const h = Math.ceil(ms / 36e5);
-  return h <= 24 ? `Termina em ${h} h` : `Termina em ${Math.ceil(ms / 864e5)} dias`;
-}
-
-function escudoLiga(nivel, ligado = true) {
-  const l = LIGAS[nivel], id = `lg${nivel}${ligado ? 'a' : 'b'}`;
+function escudoPatente(nivel, ligado = true) {
+  const l = PATENTES[nivel], id = `pt${nivel}${ligado ? 'a' : 'b'}`;
   const c1 = ligado ? l.cor2 : '#e2e8f0', c2 = ligado ? l.cor : '#a3b1c2';
   const miolo = ligado
     ? '<path d="M50 34 l6.5 13.2 14.5 2.1 -10.5 10.2 2.5 14.5 -13 -6.8 -13 6.8 2.5 -14.5 -10.5 -10.2 14.5 -2.1z" fill="#fff" opacity=".92"/>'
@@ -166,8 +98,29 @@ function escudoLiga(nivel, ligado = true) {
     ${miolo}</svg>`;
 }
 
+/* ---------------- IDENTIDADE PÚBLICA ---------------- */
+function nomePublico(a) {
+  const apelido = (a.perfil?.apelido || '').trim();
+  if (apelido) return apelido;
+  const partes = a.nome.trim().split(/\s+/);
+  return partes.length > 1 ? `${partes[0]} ${partes[partes.length - 1][0]}.` : partes[0];
+}
+const molduraDe = a => CORES_MOLDURA.includes(a.perfil?.moldura) ? a.perfil.moldura : CORES_MOLDURA[0];
+function avatarAluno(a, classe = '') {
+  const p = personagemDe(a.personagem) || PERSONAGENS[0];
+  return `<span class="av-moldura" style="--moldura:${molduraDe(a)}">${avatarSVG(p, classe, a.visual)}</span>`;
+}
+
+const ordenarXP = (x, y) => y.xp - x.xp || x.a.nome.localeCompare(y.a.nome, 'pt-BR');
+
+function tempoRestante() {
+  const ms = somarDias(inicioSemana(new Date()), 7) - Date.now();
+  const h = Math.ceil(ms / 36e5);
+  return h <= 24 ? `Termina em ${h} h` : `Termina em ${Math.ceil(ms / 864e5)} dias`;
+}
+
 /* ---------------- TELA DO RANKING ---------------- */
-let abaRanking = 'liga';
+let abaRanking = 'patente';
 
 function abrirRanking() {
   renderRanking();
@@ -186,7 +139,7 @@ function renderRanking() {
   });
   $('#rk-xp').textContent = xpDaSemana(aluno);
   const el = $('#ranking-conteudo');
-  el.innerHTML = abaRanking === 'liga' ? htmlLiga() : abaRanking === 'turma' ? htmlTurma() : htmlGeral();
+  el.innerHTML = abaRanking === 'patente' ? htmlPatente() : abaRanking === 'turma' ? htmlTurma() : htmlGeral();
   el.onclick = e => { const b = e.target.closest('[data-aluno]'); if (b) abrirMiniPerfil(b.dataset.aluno); };
 }
 
@@ -195,52 +148,58 @@ function centralizarFaixaLigas() {
   if (at) f.scrollLeft = at.offsetLeft - f.clientWidth / 2 + at.clientWidth / 2;
 }
 
-function linhaRanking(a, pos, xp, zona = '') {
+function linhaRanking(a, pos, xp) {
   const eu = a.id === aluno.id;
-  return `<button class="rk-linha ${eu ? 'eu' : ''} ${zona}" data-aluno="${esc(a.id)}" style="animation-delay:${Math.min(pos, 12) * 35}ms">
+  return `<button class="rk-linha ${eu ? 'eu' : ''}" data-aluno="${esc(a.id)}" style="animation-delay:${Math.min(pos, 12) * 35}ms">
     <span class="rk-pos">${['🥇', '🥈', '🥉'][pos - 1] || pos}</span>
     <span class="rk-avatar">${avatarAluno(a, 'rk')}</span>
     <span class="rk-nome"><b>${esc(nomePublico(a))}${eu ? ' <small class="voce">você</small>' : ''}</b><small>Turma ${esc(a.turma)}</small></span>
-    <span class="rk-xp">${xp} XP</span></button>`;
+    <span class="rk-xp"><span class="rk-escudo" title="Patente ${PATENTES[patenteDe(a)].nome}">${escudoPatente(patenteDe(a))}</span>${xp} XP</span></button>`;
 }
 
 function podio(lista) {
   return `<div class="podio">${lista.slice(0, 3).map((g, i) => `
     <button class="podio-lugar p${i + 1} ${g.a.id === aluno.id ? 'eu' : ''}" data-aluno="${esc(g.a.id)}">
       <span class="podio-avatar">${avatarAluno(g.a, 'podio')}${i === 0 ? '<span class="coroa">👑</span>' : ''}</span>
-      <b>${esc(nomePublico(g.a))}</b><small>${g.xp} XP</small>
+      <b>${esc(nomePublico(g.a))}</b>
+      <small class="podio-xp"><span class="rk-escudo" title="Patente ${PATENTES[patenteDe(g.a)].nome}">${escudoPatente(patenteDe(g.a))}</span>${g.xp} XP</small>
       <span class="podio-bloco">${i + 1}</span>
     </button>`).join('')}</div>`;
+}
+
+// Pódio com os 3 primeiros e, embaixo, a lista completa com TODO mundo (do 1º ao último).
+function classificacao(lista) {
+  return `${podio(lista)}
+    ${lista.length ? `<h3 class="rk-subtitulo">Classificação completa <small>${lista.length} ${lista.length === 1 ? 'pessoa' : 'pessoas'}</small></h3>` : ''}
+    <div class="rk-lista">${lista.map((g, i) => linhaRanking(g.a, i + 1, g.xp)).join('')}</div>
+    ${lista.length < 2 ? avisoSozinho() : ''}`;
 }
 
 const avisoSozinho = () => Banco.ativo
   ? '<p class="aviso rk-aviso">👋 Por enquanto só você está no ranking. Chame os colegas para jogar!</p>'
   : '<p class="aviso rk-aviso">👋 Por enquanto só você aparece aqui. O ranking mostra quem joga neste aparelho. A professora pode juntar os dados de vários aparelhos pelo painel pedagógico.</p>';
 
-function htmlLiga() {
-  const nivel = ligaDe(aluno), L = LIGAS[nivel], grupo = grupoLiga(nivel), z = regrasZona(grupo.length);
-  const topo = nivel === LIGAS.length - 1
-    ? 'Você chegou à liga mais alta! Continue jogando para não cair.'
-    : `${z.sobe === 1 ? 'O 1º lugar sobe' : `Os ${z.sobe} primeiros sobem`} para a Liga ${LIGAS[nivel + 1].nome} (mínimo de ${XP_MIN_PROMOCAO} XP).`;
-  let linhas = '';
-  grupo.forEach((g, i) => {
-    if (i === z.sobe && nivel < LIGAS.length - 1) linhas += '<div class="rk-divisor sobe">⬆ Zona de promoção</div>';
-    if (z.desce && nivel > 0 && i === grupo.length - z.desce) linhas += '<div class="rk-divisor desce">⬇ Zona de rebaixamento</div>';
-    const d = destinoNaLiga(nivel, i, g.xp, grupo.length);
-    linhas += linhaRanking(g.a, i + 1, g.xp, d > 0 ? 'z-sobe' : d < 0 ? 'z-desce' : '');
-  });
+function htmlPatente() {
+  const info = infoPatente(aluno), P = info.atual, todos = alunosRanking();
+  const grupo = todos.filter(a => patenteDe(a) === info.n).map(a => ({ a, xp: xpTotal(a) })).sort(ordenarXP);
+  const porPatente = PATENTES.map((_, i) => todos.filter(a => patenteDe(a) === i).length);
   return `
-    <div class="faixa-ligas" id="faixa-ligas">${LIGAS.map((l, i) => `<div class="escudo-item ${i === nivel ? 'atual' : ''}" title="Liga ${l.nome}">${escudoLiga(i, i <= nivel)}</div>`).join('')}</div>
-    <div class="liga-titulo"><h2>Liga ${L.nome}</h2><p>${topo}</p><span class="liga-tempo">⏳ ${tempoRestante()}</span></div>
-    <div class="rk-lista">${linhas}</div>
-    ${grupo.length >= 2 ? '' : alunosRanking().length < 2 ? avisoSozinho() : `<p class="aviso rk-aviso">🚀 Você é a única pessoa na Liga ${L.nome} por enquanto. Os colegas que subirem de liga vão aparecer aqui. Veja todo mundo nas abas Turma e Geral.</p>`}
-    <details class="rk-regras"><summary>Como funcionam as ligas?</summary><ul>
-      <li>Cada acerto vale XP: 10 no fácil, 15 no médio e 20 no difícil. Repetir uma fase também soma XP.</li>
-      <li>A semana vai de segunda a domingo. À meia-noite de domingo a liga fecha.</li>
-      <li>Os primeiros colocados com pelo menos ${XP_MIN_PROMOCAO} XP sobem de liga.</li>
-      <li>Quem termina na zona de rebaixamento, ou não joga na semana, desce uma liga.</li>
-      <li>São ${LIGAS.length} ligas: ${LIGAS.map(l => l.nome).join(', ')}.</li>
-    </ul></details>`;
+    <div class="faixa-ligas" id="faixa-ligas">${PATENTES.map((p, i) => `<div class="escudo-item ${i === info.n ? 'atual' : ''}" title="Patente ${p.nome}: ${p.xp} XP">${escudoPatente(i, i <= info.n)}</div>`).join('')}</div>
+    <div class="liga-titulo"><h2>Patente ${P.nome}</h2>
+      ${info.prox
+        ? `<p>Faltam <b>${info.falta} XP</b> para a Patente ${info.prox.nome}</p>
+           <div class="patente-progresso"><span class="barra"><i style="width:${info.pct.toFixed(1)}%"></i></span><small>${info.xp} de ${info.prox.xp} XP</small></div>`
+        : `<p>Você chegou à patente mais alta do jogo, com ${info.xp} XP! 💎</p>`}
+    </div>
+    <h3 class="rk-subtitulo">Colegas na Patente ${P.nome}</h3>
+    <div class="rk-lista">${grupo.map((g, i) => linhaRanking(g.a, i + 1, g.xp)).join('')}</div>
+    ${grupo.length >= 2 ? '' : todos.length < 2 ? avisoSozinho() : `<p class="aviso rk-aviso">🚀 Você é a única pessoa na Patente ${P.nome} por enquanto. Veja todo mundo nas abas Turma e Geral.</p>`}
+    <details class="rk-regras" open><summary>Como funcionam as patentes?</summary>
+      <p class="rk-regras-texto">Cada acerto vale XP: 10 no fácil, 15 no médio e 20 no difícil. Repetir uma fase também soma. A patente sobe na hora em que você junta o XP e nunca desce.</p>
+      <ul class="escada-patentes">${PATENTES.map((p, i) => `
+        <li class="${i === info.n ? 'atual' : i < info.n ? 'feita' : ''}">${escudoPatente(i, i <= info.n)}
+          <b>${p.nome}</b><span>${p.xp} XP</span><small>${porPatente[i]} ${porPatente[i] === 1 ? 'pessoa' : 'pessoas'}</small></li>`).join('')}
+      </ul></details>`;
 }
 
 function htmlTurma() {
@@ -248,25 +207,23 @@ function htmlTurma() {
   const lista = alunosRanking().filter(a => normalizarTurma(a.turma) === minha)
     .map(a => ({ a, xp: xpDaSemana(a, semana) })).sort(ordenarXP);
   return `<div class="rk-cabecalho"><h2>Turma ${esc(aluno.turma)}</h2><p>XP ganho nesta semana · ⏳ ${tempoRestante()}</p></div>
-    ${podio(lista)}<div class="rk-lista">${lista.slice(3).map((g, i) => linhaRanking(g.a, i + 4, g.xp)).join('')}</div>
-    ${lista.length < 2 ? avisoSozinho() : ''}`;
+    ${classificacao(lista)}`;
 }
 
 function htmlGeral() {
   const lista = alunosRanking().map(a => ({ a, xp: xpTotal(a) })).sort(ordenarXP);
   return `<div class="rk-cabecalho"><h2>Todos os tempos</h2><p>XP total de todas as turmas</p></div>
-    ${podio(lista)}<div class="rk-lista">${lista.slice(3).map((g, i) => linhaRanking(g.a, i + 4, g.xp)).join('')}</div>
-    ${lista.length < 2 ? avisoSozinho() : ''}`;
+    ${classificacao(lista)}`;
 }
 
 function abrirMiniPerfil(id) {
   const a = alunosRanking().find(x => x.id === id); if (!a) return;
-  const nivel = ligaDe(a), of = ofensiva(a), eu = id === aluno.id;
+  const nivel = patenteDe(a), of = ofensiva(a), eu = id === aluno.id;
   abrirModal(`<div class="mini-perfil">
     <div class="mini-avatar">${avatarAluno(a, 'mini')}</div>
     <h2>${esc(nomePublico(a))}</h2>
     <p class="perfil-sub">Turma ${esc(a.turma)} · Nível ${nivelDe(xpTotal(a)).n}</p>
-    <div class="mini-liga">${escudoLiga(nivel)}<span>Liga ${LIGAS[nivel].nome}</span></div>
+    <div class="mini-liga">${escudoPatente(nivel)}<span>Patente ${PATENTES[nivel].nome}</span></div>
     <div class="grade-stats mini">
       ${tileStat('🔥', of.dias, of.dias === 1 ? 'dia de ofensiva' : 'dias de ofensiva', of.hoje ? 'fogo' : 'apagado')}
       ${tileStat('⚡', xpTotal(a), 'XP total')}
@@ -277,25 +234,6 @@ function abrirMiniPerfil(id) {
     <button class="btn btn-texto" onclick="fecharModal()">Fechar</button></div>`);
   if (eu) $('#mini-ver-perfil').onclick = () => { fecharModal(); abrirPerfil(); };
   animarNumeros($('#modal-conteudo'));
-}
-
-// Ao abrir a trilha, avisa uma vez como foi a liga da semana passada.
-function verificarResultadoLiga() {
-  const r = calcularLigas().resultado[aluno.id];
-  const passada = chaveDia(somarDias(inicioSemana(new Date()), -7));
-  if (!r || r.semana !== passada || aluno.ligaVista === r.semana) return;
-  aluno.ligaVista = r.semana; salvarAluno();
-  if (r.xp === 0 && r.para === r.de) return;
-  const L = LIGAS[r.para];
-  const titulo = r.para > r.de ? `Você subiu para a Liga ${L.nome}!` : r.para < r.de ? `Você caiu para a Liga ${L.nome}` : `Você continua na Liga ${L.nome}`;
-  const texto = r.para < r.de ? 'Sem problema: jogue nesta semana para subir de novo!' : `Você terminou a semana em ${r.posicao}º lugar com ${r.xp} XP.`;
-  abrirModal(`<div class="liga-modal">
-    <div class="escudo-grande">${escudoLiga(r.para)}</div>
-    <h2>${titulo}</h2><p>${texto}</p>
-    <button class="btn btn-primario btn-grande" id="liga-ver">Ver ranking 🏆</button>
-    <button class="btn btn-texto" onclick="fecharModal()">Fechar</button></div>`);
-  $('#liga-ver').onclick = () => { fecharModal(); abrirRanking(); };
-  if (r.para > r.de) confete();
 }
 
 function iniciarRanking() {

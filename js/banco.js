@@ -53,7 +53,7 @@ const lerLS = k => { try { return localStorage.getItem(CHAVE + k); } catch { ret
 const gravarLS = (k, v) => { try { v == null ? localStorage.removeItem(CHAVE + k) : localStorage.setItem(CHAVE + k, v); } catch { /* sem armazenamento */ } };
 const semSenha = a => { const { pin, ...resto } = a; return resto; };
 // Garante os campos que o site espera, mesmo numa conta recém-criada no banco.
-const comPadroes = reg => ({ personagem: null, fases: {}, tentativas: [], conquistas: [], meta: null, maiorSequencia: 0, perfil: {}, ...reg });
+const comPadroes = reg => ({ personagem: null, fases: {}, tentativas: [], conquistas: [], meta: null, maiorSequencia: 0, perfil: {}, compras: [], visual: {}, ...reg });
 const chaveDe = a => chaveConta(a.turma, a.nome);
 
 const Sync = {

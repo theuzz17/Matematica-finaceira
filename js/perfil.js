@@ -44,7 +44,7 @@ function graficoSemana(a) {
 
 function abrirPerfil() {
   aluno.perfil ||= {};
-  const a = aluno, xp = xpTotal(a), nv = nivelDe(xp), of = ofensiva(a), nivelLiga = ligaDe(a), p = personagem();
+  const a = aluno, xp = xpTotal(a), nv = nivelDe(xp), of = ofensiva(a), pat = infoPatente(a), p = personagem();
   const resp = a.tentativas.flatMap(t => t.respostas || []);
   const taxa = resp.length ? Math.round(resp.filter(r => r.acertou).length / resp.length * 100) : 0;
   const desde = new Date(a.criadoEm).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
@@ -60,12 +60,13 @@ function abrirPerfil() {
       <p class="perfil-desde">Na trilha desde ${desde}</p>
       <p class="perfil-sync">${!Banco.ativo ? '📱 Progresso salvo neste aparelho' : Sync.pendente ? '📴 Progresso guardado no aparelho, aguardando internet para enviar' : '☁️ Progresso salvo no banco de dados'}</p>
       <div class="perfil-chips">
-        <button class="chip-liga" id="pf-liga">${escudoLiga(nivelLiga)}Liga ${LIGAS[nivelLiga].nome}</button>
-        <span class="chip-parceiro">${avatarSVG(p, 'chip')}Parceiro: ${esc(p.apelido)}</span>
+        <button class="chip-liga" id="pf-liga">${escudoPatente(pat.n)}Patente ${pat.atual.nome}</button>
+        <span class="chip-parceiro">${avatarSVG(p, 'chip', a.visual)}Parceiro: ${esc(p.apelido)}</span>
       </div>
       <div class="perfil-acoes">
         <button class="btn btn-secundario" id="pf-editar">✏️ Editar perfil</button>
         <button class="btn btn-secundario" id="pf-foto2">🐾 Trocar foto</button>
+        <button class="btn btn-secundario pf-loja" id="pf-loja">🛍️ Vestir meu bichinho na lojinha</button>
       </div>
 
       <div class="cartao-nivel">
@@ -82,6 +83,8 @@ function abrirPerfil() {
         ${tileStat('🗺️', fasesConcluidas(a), `de ${FASES.length} fases`)}
         ${tileStat('🎯', taxa, 'de acerto', '', '%')}
         ${tileStat('🏆', of.recorde, 'recorde de ofensiva')}
+        ${tileStat(ICONE_MOEDA, saldoMoedas(a), 'moedas', 'moedas')}
+        ${tileStat('🎒', comprasDe(a).length, `de ${ITENS_LOJA.length} itens da loja`)}
       </div>
       ${of.hoje ? '' : `<p class="dica-ofensiva">${of.dias ? `🔥 Jogue uma fase hoje para não perder sua ofensiva de ${of.dias} ${of.dias === 1 ? 'dia' : 'dias'}!` : '🔥 Jogue uma fase hoje para começar uma ofensiva!'}</p>`}
 
@@ -100,7 +103,8 @@ function abrirPerfil() {
 
   $('#pf-foto').onclick = $('#pf-foto2').onclick = abrirTrocaFoto;
   $('#pf-editar').onclick = abrirEditarPerfil;
-  $('#pf-liga').onclick = () => { abaRanking = 'liga'; abrirRanking(); };
+  $('#pf-loja').onclick = abrirLoja;
+  $('#pf-liga').onclick = () => { abaRanking = 'patente'; abrirRanking(); };
   $('#pf-conquistas').onclick = abrirConquistas;
   $('#pf-sair').onclick = sairDaConta;
   mostrar('tela-perfil');
@@ -121,12 +125,12 @@ function abrirTrocaFoto() {
       <p class="campo-rotulo">🎨 Cor da moldura</p>
       <div class="grade-cores">${CORES_MOLDURA.map(c => `<button class="cor-op" data-cor="${c}" style="--c:${c}" aria-label="Moldura cor ${c}"></button>`).join('')}</div>
     </div>
-    <p class="dica">O animal escolhido também vira seu parceiro na trilha.</p>
+    <p class="dica">O animal escolhido também vira seu parceiro na trilha. As roupas da lojinha continuam com ele.</p>
     <button class="btn btn-primario btn-grande" id="foto-salvar">Salvar foto</button>
     <button class="btn btn-texto" onclick="fecharModal()">Cancelar</button>`);
   const atualizar = () => {
     const p = personagemDe(escolhido);
-    $('#foto-preview').innerHTML = `<span class="av-moldura" style="--moldura:${cor}">${avatarSVG(p, 'preview')}</span>`;
+    $('#foto-preview').innerHTML = `<span class="av-moldura" style="--moldura:${cor}">${avatarSVG(p, 'preview', aluno.visual)}</span>`;
     $('#foto-legenda').innerHTML = `<b>${esc(p.nome)}</b><br>"${esc(p.frase)}"`;
     document.querySelectorAll('.foto-op').forEach(b => b.classList.toggle('sel', b.dataset.id === escolhido));
     document.querySelectorAll('.cor-op').forEach(b => { const on = b.dataset.cor === cor; b.classList.toggle('sel', on); b.setAttribute('aria-pressed', on); });

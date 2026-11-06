@@ -1,25 +1,10 @@
--- =========================================================
--- BANCO DE DADOS — Conectados com o Dinheiro
--- Cole este arquivo inteiro no SQL Editor do Supabase e clique em "Run".
--- Pode rodar de novo sem perder dados: ele só cria o que falta e
--- atualiza as funções.
---
--- Segurança:
---  * As tabelas ficam fechadas (RLS ligado e sem políticas). Ninguém lê
---    nem altera as tabelas direto pela internet.
---  * O site só conversa com o banco por funções (RPC) que conferem a
---    senha do estudante, o token da sessão ou o PIN da professora.
---  * Senhas e PIN são guardados com hash bcrypt, nunca em texto.
---  * Depois de 8 senhas erradas seguidas, a conta trava por 15 minutos.
--- =========================================================
-
 create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
 create extension if not exists unaccent with schema extensions;
 
--- ---------------------------------------------------------
+
 -- TABELAS
--- ---------------------------------------------------------
+
 create table if not exists public.alunos (
   id            uuid primary key default gen_random_uuid(),
   nome          text not null check (char_length(nome) between 2 and 40),
@@ -88,6 +73,7 @@ declare
   tent  jsonb;
   conq  jsonb;
   bonus jsonb;
+  comp  jsonb;
   fases jsonb := '{}'::jsonb;
   fa    jsonb;
   fb    jsonb;
@@ -128,6 +114,19 @@ begin
     order by x.b->>'data', x.b->>'pontos'
   ) as y;
 
+  -- Itens comprados na lojinha: junta os dois lados, um registro por item (vale a compra mais antiga).
+  select coalesce(jsonb_agg(y.c order by y.c->>'data'), '[]'::jsonb) into comp
+  from (
+    select distinct on (x.c->>'item') x.c
+    from (
+      select jsonb_array_elements(case when jsonb_typeof(antigo->'compras') = 'array' then antigo->'compras' else '[]'::jsonb end)
+      union all
+      select jsonb_array_elements(case when jsonb_typeof(novo->'compras') = 'array' then novo->'compras' else '[]'::jsonb end)
+    ) as x(c)
+    where jsonb_typeof(x.c) = 'object' and x.c->>'item' is not null
+    order by x.c->>'item', x.c->>'data'
+  ) as y;
+
   fa := case when jsonb_typeof(antigo->'fases') = 'object' then antigo->'fases' else '{}'::jsonb end;
   fb := case when jsonb_typeof(novo->'fases')   = 'object' then novo->'fases'   else '{}'::jsonb end;
   for k in select jsonb_object_keys(fa) union select jsonb_object_keys(fb) loop
@@ -150,6 +149,7 @@ begin
     'tentativas', tent,
     'conquistas', conq,
     'bonusXp', bonus,
+    'compras', comp,
     'fases', fases,
     'maiorSequencia', greatest(coalesce((antigo->>'maiorSequencia')::numeric, 0), coalesce((novo->>'maiorSequencia')::numeric, 0)));
 end $$;
@@ -215,7 +215,7 @@ begin
   if char_length(nm) not between 2 and 40 or char_length(tm) not between 1 and 15 or coalesce(p_pin, '') !~ '^\d{4}$' then
     return jsonb_build_object('erro', 'DADOS_INVALIDOS');
   end if;
-  if p_dados is not null and (jsonb_typeof(p_dados) <> 'object' or octet_length(p_dados::text) > 500000) then
+  if p_dados is not null and (jsonb_typeof(p_dados) <> 'object' or octet_length(p_dados::text) > 3000000) then
     return jsonb_build_object('erro', 'DADOS_INVALIDOS');
   end if;
 
@@ -286,7 +286,7 @@ declare
 begin
   r := public.aluno_da_sessao(p_token);
   if r.id is null then return jsonb_build_object('erro', 'SESSAO_INVALIDA'); end if;
-  if p_dados is null or jsonb_typeof(p_dados) <> 'object' or octet_length(p_dados::text) > 500000 then
+  if p_dados is null or jsonb_typeof(p_dados) <> 'object' or octet_length(p_dados::text) > 3000000 then
     return jsonb_build_object('erro', 'DADOS_INVALIDOS');
   end if;
 
@@ -349,6 +349,7 @@ begin
       'turma', a.turma,
       'personagem', a.dados->'personagem',
       'perfil', jsonb_build_object('apelido', a.dados->'perfil'->'apelido', 'moldura', a.dados->'perfil'->'moldura'),
+      'visual', case when jsonb_typeof(a.dados->'visual') = 'object' then a.dados->'visual' else '{}'::jsonb end,
       'criadoEm', coalesce(a.dados->>'criadoEm', to_json(a.criado_em) #>> '{}'),
       'conquistas', case when jsonb_typeof(a.dados->'conquistas') = 'array' then a.dados->'conquistas' else '[]'::jsonb end,
       'fases', case when jsonb_typeof(a.dados->'fases') = 'object' then a.dados->'fases' else '{}'::jsonb end,

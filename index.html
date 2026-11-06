@@ -57,6 +57,7 @@
       </button>
       <div class="topo-stats">
         <span class="stat ofensiva" id="topo-ofensiva-wrap" title="Ofensiva"><span class="fogo-ic">🔥</span> <b id="topo-ofensiva">0</b></span>
+        <button class="stat stat-moedas" id="topo-moedas-btn" title="Moedas: abrir a lojinha" aria-label="Moedas, abrir a lojinha"><svg class="ic-moeda" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="#fbbf24" stroke="#b45309" stroke-width="1.5"/><circle cx="10" cy="10" r="5.6" fill="none" stroke="#d97706" stroke-width="1.3"/></svg> <b id="topo-moedas">0</b></button>
         <span class="stat" title="Pontos">💎 <b id="topo-pontos">0</b></span>
         <span class="stat" title="Estrelas">⭐ <b id="topo-estrelas">0</b></span>
       </div>
@@ -64,8 +65,19 @@
     <div class="conteudo">
       <div id="meta-resumo"></div>
       <h2 class="titulo-trilha">🗺️ Trilha do Dinheiro Esperto</h2>
+      <p class="subtitulo-trilha">3 mundos · 33 fases · nas bifurcações 🔀 você escolhe o caminho</p>
+      <div id="mundos-nav" class="mundos-nav"></div>
       <div id="mapa" class="mapa"></div>
     </div>
+  </section>
+
+  <!-- LOJINHA -->
+  <section id="tela-loja" class="tela">
+    <header class="topo">
+      <strong class="topo-tit">🛍️ Lojinha</strong>
+      <span class="stat stat-moedas" title="Suas moedas"><svg class="ic-moeda" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="#fbbf24" stroke="#b45309" stroke-width="1.5"/><circle cx="10" cy="10" r="5.6" fill="none" stroke="#d97706" stroke-width="1.3"/></svg> <b id="loja-saldo">0</b> moedas</span>
+    </header>
+    <div class="conteudo" id="loja-conteudo"></div>
   </section>
 
   <!-- RANKING -->
@@ -76,7 +88,7 @@
     </header>
     <div class="conteudo">
       <div class="abas" role="tablist" aria-label="Tipo de ranking">
-        <button class="aba ativa" role="tab" data-aba="liga">🛡️ Liga</button>
+        <button class="aba ativa" role="tab" data-aba="patente">🛡️ Patentes</button>
         <button class="aba" role="tab" data-aba="turma">👥 Turma</button>
         <button class="aba" role="tab" data-aba="geral">🌎 Geral</button>
       </div>
@@ -169,10 +181,12 @@
   <!-- MODAL -->
   <div id="modal" class="modal"><div class="modal-caixa" id="modal-conteudo" role="dialog" aria-modal="true"></div></div>
   <div id="toasts" class="toasts"></div>
+  <div id="celebracao" class="celebracao" role="dialog" aria-modal="true" aria-labelledby="cel-titulo" hidden></div>
 
   <!-- NAVEGAÇÃO INFERIOR -->
   <nav id="nav-inferior" class="nav-inferior" aria-label="Navegação principal" hidden>
     <button data-ir="trilha"><span aria-hidden="true">🗺️</span>Trilha</button>
+    <button data-ir="loja"><span aria-hidden="true">🛍️</span>Loja</button>
     <button data-ir="ranking"><span aria-hidden="true">🏆</span>Ranking</button>
     <button data-ir="perfil"><span aria-hidden="true">👤</span>Perfil</button>
   </nav>
@@ -180,8 +194,12 @@
   <script src="js/config.js"></script>
   <script src="js/personagens.js"></script>
   <script src="js/questoes.js"></script>
+  <script src="js/questoes2.js"></script>
+  <script src="js/questoes3.js"></script>
+  <script src="js/trilha.js"></script>
   <script src="js/ranking.js"></script>
   <script src="js/perfil.js"></script>
+  <script src="js/loja.js"></script>
   <script src="js/app.js"></script>
   <script src="js/banco.js"></script>
 </body>

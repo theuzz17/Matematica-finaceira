@@ -11,7 +11,8 @@ const olhos = (x1, x2, y, r = 4.2) => `
 const bochechas = (x1, x2, y, cor = '#ff8fa3') => `
   <ellipse cx="${x1}" cy="${y}" rx="5" ry="3" fill="${cor}" opacity=".55"/><ellipse cx="${x2}" cy="${y}" rx="5" ry="3" fill="${cor}" opacity=".55"/>`;
 
-const fundo = (c1, c2) => `<circle cx="50" cy="50" r="50" fill="${c1}"/><path d="M0 72 Q25 62 50 70 T100 68 V100 H0Z" fill="${c2}"/>`;
+// O fundo fica num grupo próprio para a lojinha poder trocar por outro cenário.
+const fundo = (c1, c2) => `<g class="av-fundo"><circle cx="50" cy="50" r="50" fill="${c1}"/><path d="M0 72 Q25 62 50 70 T100 68 V100 H0Z" fill="${c2}"/></g>`;
 
 function svgPeixeBoi() {
   return `${fundo('#bfe8f7', '#7fcbe6')}
@@ -192,7 +193,9 @@ const PERSONAGENS = [
     info: 'O povo Potiguara vive em Rio Tinto, Baía da Traição e Marcação.', svg: svgPotiguara(false) },
 ];
 
-/* Devolve o desenho do personagem pronto para colocar no HTML. */
-function avatarSVG(p, classe = '') {
-  return `<svg class="avatar-svg av-${classe}" viewBox="0 0 100 100" role="img" aria-label="${p.nome}"><defs><clipPath id="clip-${p.id}-${classe || 'x'}"><circle cx="50" cy="50" r="50"/></clipPath></defs><g clip-path="url(#clip-${p.id}-${classe || 'x'})">${p.svg}</g></svg>`;
+/* Devolve o desenho do personagem pronto para colocar no HTML.
+   "visual" são as roupas compradas na lojinha (chapéu, óculos...). */
+function avatarSVG(p, classe = '', visual = null) {
+  const corpo = visual && typeof vestir === 'function' ? vestir(p, visual) : p.svg;
+  return `<svg class="avatar-svg av-${classe}" viewBox="0 0 100 100" role="img" aria-label="${p.nome}"><defs><clipPath id="clip-${p.id}-${classe || 'x'}"><circle cx="50" cy="50" r="50"/></clipPath></defs><g clip-path="url(#clip-${p.id}-${classe || 'x'})">${corpo}</g></svg>`;
 }
