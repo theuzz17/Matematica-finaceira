@@ -107,6 +107,7 @@
       <button class="btn-icone" id="quiz-sair" aria-label="Sair da fase">✖</button>
       <div class="quiz-progresso"><i id="quiz-barra"></i></div>
       <span id="quiz-contador" class="quiz-contador"></span>
+      <button type="button" class="btn-icone quiz-som" id="quiz-som" aria-label="Sons" aria-pressed="true" title="Desligar os sons">🔊</button>
     </header>
     <div class="conteudo quiz-conteudo">
       <div class="quiz-cabecalho">
@@ -125,6 +126,13 @@
       <div id="quiz-opcoes" class="opcoes"></div>
       <div id="quiz-feedback" class="feedback"></div>
     </div>
+    <!-- Esconde a questão quando o estudante sai da tela ou tenta tirar print (ver protecao.js) -->
+    <button type="button" id="quiz-cortina" class="quiz-cortina" hidden>
+      <span class="qc-icone" aria-hidden="true">🙈</span>
+      <b>Questão escondida</b>
+      <span class="qc-texto">Nada de print nem de cola! Se você sai da tela, a questão muda.</span>
+      <span class="btn btn-primario qc-botao">Voltar para a fase</span>
+    </button>
   </section>
 
   <!-- RESULTADO -->
@@ -200,6 +208,8 @@
   <script src="js/ranking.js"></script>
   <script src="js/perfil.js"></script>
   <script src="js/loja.js"></script>
+  <script src="js/sons.js"></script>
+  <script src="js/protecao.js"></script>
   <script src="js/app.js"></script>
   <script src="js/banco.js"></script>
 </body>

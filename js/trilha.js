@@ -128,9 +128,13 @@ function statusMundo(a, m) {
 }
 
 /* ---------------- SORTEIO DAS QUESTÕES ---------------- */
+// Cada questão guarda o gerador e o grupo de onde saiu, para poder ser trocada
+// por outra do mesmo nível (proteção contra print, ver protecao.js).
+const gerarDe = (g, grupo) => Object.assign(g(), { gerador: g, grupo });
+
 /* No máximo 1 fácil e pelo menos 2 difíceis (quando a fase tem), sem repetir o tipo de questão. */
 function escolherQuestoes(geradores, qtd, semFacil = false) {
-  let qs = R.shuffle(geradores).map(g => g());
+  let qs = R.shuffle(geradores).map(g => gerarDe(g, geradores));
   if (semFacil) qs = qs.filter(q => q.nivel !== 'facil');
   const dif = qs.filter(q => q.nivel === 'dificil');
   const med = qs.filter(q => q.nivel === 'medio');
@@ -150,10 +154,29 @@ function gerarQuestoesDaFase(fase) {
   const qtd = qtdQuestoes(fase);
   const doMundo = FASES.filter(f => f.mundo === fase.mundo && !f.final);
   const calculo = doMundo.filter(f => !f.conceitual).flatMap(f => f.geradores);
-  const fortes = R.shuffle(calculo.map(g => g()).filter(q => q.nivel !== 'facil')).slice(0, qtd - 2);
-  const pools = R.shuffle(doMundo.filter(f => f.conceitual)).map(f => R.shuffle(f.geradores.map(g => g()).filter(q => q.nivel !== 'facil')));
+  const fortes = R.shuffle(calculo.map(g => gerarDe(g, calculo)).filter(q => q.nivel !== 'facil')).slice(0, qtd - 2);
+  const pools = R.shuffle(doMundo.filter(f => f.conceitual)).map(f => R.shuffle(f.geradores.map(g => gerarDe(g, f.geradores)).filter(q => q.nivel !== 'facil')));
   const conceito = pools.map(p => p.shift()).filter(Boolean);
   const resto = pools.flat();
   while (conceito.length < 2 && resto.length) conceito.push(resto.shift());
   return R.shuffle([...fortes, ...conceito.slice(0, 2)]);
+}
+
+/* Questão para pôr no lugar de "q": mesmo nível (vale os mesmos pontos) e mesmo grupo.
+   Primeiro um tipo que ainda não apareceu nesta tentativa; depois o mesmo tipo com
+   números novos; por último um tipo que já saiu antes. Nunca repete uma questão da prova
+   (nas de gráfico o texto pode ser igual: o que muda é o gráfico). */
+const assinatura = q => q.texto + '|' + (q.visual || '');
+function questaoSubstituta(q, naProva, jaVistos) {
+  const grupo = q.grupo || [];
+  const ocupados = new Set(naProva.map(x => x.gerador));
+  const naTela = new Set(naProva.map(assinatura));
+  const livres = R.shuffle(grupo.filter(g => !ocupados.has(g)));
+  const candidatos = [...livres.filter(g => !jaVistos.has(g)), ...Array(8).fill(q.gerador), ...livres.filter(g => jaVistos.has(g))];
+  for (const g of candidatos) {
+    if (typeof g !== 'function') continue;
+    const nova = gerarDe(g, grupo);
+    if (nova.nivel === q.nivel && !naTela.has(assinatura(nova))) return nova;
+  }
+  return null;
 }

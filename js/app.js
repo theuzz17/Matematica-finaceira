@@ -80,6 +80,7 @@ function mostrar(tela) {
     b.classList.toggle('ativa', on);
     on ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current');
   });
+  Protecao.telaMudou(tela);
   window.scrollTo(0, 0);
 }
 function abrirModal(html) { $('#modal-conteudo').innerHTML = html; $('#modal').classList.add('aberto'); }
@@ -446,6 +447,7 @@ function abrirDetalheFase(i) {
         <li>${ICONE_MOEDA} ${premioPrevisto(f, prog)}</li>
         ${extra}
         <li>🔁 Pode tentar de novo quantas vezes quiser (vale a melhor pontuação)</li>
+        <li>🙈 Sem cola: se você sair da tela ou tirar print, a questão muda</li>
       </ul>
       ${prog ? `<p class="recorde">Seu recorde: <b>${prog.melhorAcertos}/${qtd}</b> · ${prog.melhorPontos} pts · ${'★'.repeat(prog.estrelas)}${'☆'.repeat(3 - prog.estrelas)}</p>` : ''}
       <button class="btn btn-primario btn-grande" id="btn-comecar">${prog ? 'Jogar de novo' : 'Começar!'}</button>
@@ -457,7 +459,10 @@ function abrirDetalheFase(i) {
 /* ---------------- QUIZ ---------------- */
 function iniciarQuiz(i) {
   const fase = FASES[i];
-  quiz = { i, fase, questoes: gerarQuestoesDaFase(fase), atual: 0, acertos: 0, pontos: 0, sequencia: 0, maiorSeq: 0, respostas: [] };
+  const questoes = gerarQuestoesDaFase(fase);
+  // "vistos": tipos de questão que já apareceram nesta tentativa (para a troca não repetir).
+  quiz = { i, fase, questoes, vistos: new Set(questoes.map(q => q.gerador)), atual: 0, acertos: 0, pontos: 0, sequencia: 0, maiorSeq: 0, respostas: [] };
+  Som.preparar();   // aproveita o toque em "Começar" para liberar o som no celular
   $('#quiz-fase').textContent = `${fase.icone} ${fase.nome}`;
   $('#tela-quiz').style.setProperty('--cor', fase.cor);
   mostrar('tela-quiz');
@@ -485,9 +490,25 @@ function mostrarQuestao() {
   $('#quiz-feedback').innerHTML = '';
 }
 
+// Proteção contra print: põe outra questão do mesmo nível (mesmos pontos) no lugar da que está aberta.
+function trocarQuestaoAtual() {
+  if (!quiz || $('#quiz-feedback').classList.contains('aberto')) return false;
+  const nova = questaoSubstituta(quiz.questoes[quiz.atual], quiz.questoes, quiz.vistos);
+  if (!nova) return false;
+  quiz.questoes[quiz.atual] = nova;
+  quiz.vistos.add(nova.gerador);
+  mostrarQuestao();
+  $('#quiz-fala').textContent = 'Questão nova! Sem cola: você consegue! 💪';
+  const conteudo = $('.quiz-conteudo');
+  conteudo.classList.remove('trocada'); void conteudo.offsetWidth; conteudo.classList.add('trocada');
+  return true;
+}
+
 function responder(k) {
+  if (Protecao.cobrindo()) return;   // questão escondida: não dá para responder
   const q = quiz.questoes[quiz.atual];
   const acertou = k === q.correta;
+  acertou ? Som.acerto() : Som.erro();
   document.querySelectorAll('.opcao').forEach((b, idx) => {
     b.disabled = true;
     if (idx === q.correta) b.classList.add('certa');
@@ -1040,7 +1061,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const b = e.target.closest('[data-ir]'); if (!b || !aluno) return;
     ({ trilha: abrirTrilha, loja: abrirLoja, ranking: abrirRanking, perfil: abrirPerfil })[b.dataset.ir]();
   };
-  $('#quiz-sair').onclick = () => { if (confirm('Sair da fase? O progresso desta tentativa será perdido.')) abrirTrilha(); };
+  $('#quiz-sair').onclick = () => { if (Protecao.confirmar('Sair da fase? O progresso desta tentativa será perdido.')) abrirTrilha(); };
   $('#modal').onclick = e => { if (e.target.id === 'modal') fecharModal(); };
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') { fecharModal(); fecharCelebracao(); }
