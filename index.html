@@ -27,7 +27,10 @@
       </div>
       <form id="form-login" autocomplete="off">
         <label class="campo">Seu nome<input id="login-nome" maxlength="40" autocapitalize="words" placeholder="Ex.: Maria Silva" required></label>
-        <label class="campo">Turma<input id="login-turma" maxlength="15" placeholder="Ex.: 8º A" required></label>
+        <div class="campo" role="radiogroup" aria-labelledby="rotulo-turma">
+          <span id="rotulo-turma">Sua turma</span>
+          <div class="segmentado seg-turma" id="login-turmas"></div>
+        </div>
         <label class="campo">Senha (4 números)<input id="login-pin" type="password" inputmode="numeric" maxlength="4" pattern="\d{4}" placeholder="••••" required></label>
         <label class="campo" id="campo-pin2" hidden>Repita a senha<input id="login-pin2" type="password" inputmode="numeric" maxlength="4" pattern="\d{4}" placeholder="••••"></label>
         <p class="erro" id="login-erro"></p>

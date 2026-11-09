@@ -10,3 +10,8 @@ const CONFIG_BANCO = {
   url: 'https://enbiapwwxyspnphzhybj.supabase.co',
   chave: 'sb_publishable_kBmT0ZDVdZ0Mlur-OnnXLA_wufPYjIW',
 };
+
+/* TURMAS do jogo. Cada estudante escolhe a sua ao criar a conta, e o ranking
+   de turma só mostra os colegas da mesma turma (o Geral junta todas).
+   Para abrir outra turma, acrescente aqui e em turmas_oficiais() no supabase/banco.sql. */
+const TURMAS = ['8º A', '8º B'];

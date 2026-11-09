@@ -1,8 +1,3 @@
-/* =========================================================
-   QUESTÕES DOS MUNDOS 2 E 3 — mesmas regras do questoes.js:
-   números, nomes e ordem das alternativas são sorteados na hora.
-   ========================================================= */
-
 const FMT_FATOR4 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 const fator = v => FMT_FATOR4.format(v);
 const unid = (um, varios) => v => `${num(v)} ${Math.abs(v) === 1 ? um : varios}`;

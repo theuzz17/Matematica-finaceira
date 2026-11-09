@@ -11,7 +11,8 @@ class ErroBanco extends Error {
 
 const MENSAGENS_BANCO = {
   SENHA_INCORRETA: 'Senha incorreta para este nome e turma.',
-  CONTA_NAO_ENCONTRADA: 'Não encontramos uma conta com esse nome nesta turma. Confira como você escreveu, ou crie uma conta se for a primeira vez.',
+  CONTA_NAO_ENCONTRADA: 'Não encontramos uma conta com esse nome nesta turma. Confira o nome e se você escolheu a turma certa, ou crie uma conta se for a primeira vez.',
+  TURMA_INVALIDA: 'Escolha a sua turma.',
   CONTA_EXISTE: 'Já existe uma conta com esse nome nesta turma. Se é sua, entre com a sua senha.',
   SENHA_ATUAL_INCORRETA: 'A senha atual está incorreta.',
   BLOQUEADO: 'Muitas tentativas erradas. Espere 15 minutos e tente de novo.',
@@ -127,11 +128,14 @@ function aplicarServidor(reg) {
   dados.alunos[aluno.id] = aluno;
   Store.salvar(dados);
   Store.sessao(aluno.id);
+  lembrarUltimoLogin(aluno.nome, aluno.turma);   // a professora pode ter trocado a turma
 }
 
-// Login ou criação de conta pelo banco. Se o aparelho tinha progresso desta conta, ele vai junto.
+// Login ou criação de conta pelo banco. Se o aparelho tinha progresso desta conta, ele vai junto
+// (inclusive de conta antiga com turma não reconhecida, que o banco passa para a turma escolhida).
 async function entrarOnline(nome, turma, pin, modo = 'entrar') {
-  const local = Object.values(dados.alunos).find(a => chaveDe(a) === chaveConta(turma, nome) && a.pin === pin);
+  const contas = Object.values(dados.alunos).filter(a => a.pin === pin);
+  const local = contas.find(a => chaveDe(a) === chaveConta(turma, nome)) || contas.find(a => contaSemTurma(a, nome));
   const args = { p_turma: turma, p_nome: nome, p_pin: pin, p_dados: local ? semSenha(local) : null };
   let res;
   try {
@@ -155,6 +159,22 @@ async function entrarOnline(nome, turma, pin, modo = 'entrar') {
   atualizarRanking();
 }
 
+// Conta antiga sem turma reconhecida escolhe a turma. Só a turma muda no aparelho
+// (o resto continua como está, para não perder progresso que ainda não foi enviado).
+async function definirTurma(turma) {
+  if (Banco.ativo) {
+    const token = await garantirToken();
+    const res = await Banco.rpc('escolher_turma', { p_token: token, p_turma: turma });
+    aluno.turma = res.aluno.turma;
+  } else {
+    if (Object.values(dados.alunos).some(o => o.id !== aluno.id && chaveConta(o.turma, o.nome) === chaveConta(turma, aluno.nome))) throw new ErroBanco('NOME_EM_USO');
+    aluno.turma = turma;
+  }
+  dados.alunos[aluno.id] = aluno;
+  Store.salvar(dados);
+  lembrarUltimoLogin(aluno.nome, aluno.turma);
+}
+
 async function sairOnline() {
   if (!Banco.ativo) return;
   if (Sync.pendente && aluno) { clearTimeout(Sync.timer); await Sync.enviar().catch(() => {}); }
@@ -175,6 +195,13 @@ async function atualizarRanking() {
   try {
     const r = await Banco.rpc('ranking_publico', { p_token: Sync.token });
     rankingServidor = r.alunos;
+    // A professora pode ter trocado a minha turma pelo painel.
+    const eu = aluno && r.alunos.find(a => a.id === aluno.id);
+    if (eu && turmaOficial(eu.turma) && turmaOficial(eu.turma) !== turmaOficial(aluno.turma)) {
+      aluno.turma = turmaOficial(eu.turma);
+      Store.salvar(dados);
+      lembrarUltimoLogin(aluno.nome, aluno.turma);
+    }
     rankingVersao++;
     gravarLS('_ranking', JSON.stringify(r.alunos));
     return true;

@@ -60,6 +60,22 @@ language sql stable set search_path = public, extensions as $$
            '[^a-z0-9]', '', 'g')
 $$;
 
+-- TURMAS DO JOGO. Cada estudante fica em uma delas e o ranking de turma só mostra os colegas da mesma.
+-- Para abrir outra turma, acrescente aqui e em TURMAS (js/config.js).
+create or replace function public.turmas_oficiais() returns text[]
+language sql immutable as $$
+  select array['8º A', '8º B']
+$$;
+
+-- Reconhece a turma oficial escrita de qualquer jeito: "8B", "8º ano B", "8°ano b", "oitavo B", "Turma B" e "B" viram "8º B".
+-- Devolve nulo quando não dá para saber a turma (por exemplo "8º ano" ou "8").
+create or replace function public.turma_oficial(t text) returns text
+language sql stable set search_path = public, extensions as $$
+  select o from unnest(public.turmas_oficiais()) as o
+  where public.normalizar_turma(o) = regexp_replace(public.normalizar_turma(t), '^(turma)?(8|oitavo)?(ano|serie)?(turma)?', '8')
+  limit 1
+$$;
+
 create or replace function public.limpar(t text) returns text
 language sql immutable as $$
   select regexp_replace(trim(coalesce(t, '')), '\s+', ' ', 'g')
@@ -204,32 +220,52 @@ end $$;
 --   'criar'  = só cria conta nova (erro CONTA_EXISTE)
 --   'ambos'  = entra ou cria (usado para enviar progresso feito sem internet)
 -- Se o aparelho já tinha progresso guardado (p_dados), ele é juntado ao do banco.
+-- Conta nova só pode ser criada em uma das turmas oficiais.
 create or replace function public.acessar_conta(p_turma text, p_nome text, p_pin text, p_dados jsonb, p_modo text) returns jsonb
 language plpgsql set search_path = public, extensions as $$
 declare
-  r   public.alunos;
-  tok uuid;
-  nm  text := public.limpar(p_nome);
-  tm  text := public.limpar(p_turma);
+  r     public.alunos;
+  tok   uuid;
+  achou boolean;
+  ofi   boolean;
+  nm    text := public.limpar(p_nome);
+  tm    text := public.limpar(p_turma);
 begin
+  tm  := coalesce(public.turma_oficial(tm), tm);
+  ofi := tm = any(public.turmas_oficiais());
   if char_length(nm) not between 2 and 40 or char_length(tm) not between 1 and 15 or coalesce(p_pin, '') !~ '^\d{4}$' then
     return jsonb_build_object('erro', 'DADOS_INVALIDOS');
   end if;
   if p_dados is not null and (jsonb_typeof(p_dados) <> 'object' or octet_length(p_dados::text) > 3000000) then
     return jsonb_build_object('erro', 'DADOS_INVALIDOS');
   end if;
+  if p_modo = 'criar' and not ofi then
+    return jsonb_build_object('erro', 'TURMA_INVALIDA');
+  end if;
 
   select * into r from public.alunos
   where turma_norm = public.normalizar_turma(tm) and nome_norm = public.normalizar(nm)
   for update;
+  achou := found;
 
-  if found and p_modo = 'criar' then
+  -- Conta antiga com uma turma que não dá para reconhecer ("8º ano", "8"): se só existe uma
+  -- com esse nome, é ela. Ao entrar com a senha certa, ela passa para a turma escolhida agora.
+  if not achou and ofi and (
+    select count(*) from public.alunos a where a.nome_norm = public.normalizar(nm) and public.turma_oficial(a.turma) is null
+  ) = 1 then
+    select * into r from public.alunos a
+    where a.nome_norm = public.normalizar(nm) and public.turma_oficial(a.turma) is null
+    for update;
+    achou := found;
+  end if;
+
+  if achou and p_modo = 'criar' then
     return jsonb_build_object('erro', 'CONTA_EXISTE');
-  elsif not found and p_modo = 'entrar' then
+  elsif not achou and p_modo = 'entrar' then
     return jsonb_build_object('erro', 'CONTA_NAO_ENCONTRADA');
   end if;
 
-  if found then
+  if achou then
     if r.bloqueado_ate is not null and r.bloqueado_ate > now() then
       return jsonb_build_object('erro', 'BLOQUEADO');
     end if;
@@ -242,6 +278,8 @@ begin
     end if;
     update public.alunos set
       falhas = 0, bloqueado_ate = null,
+      turma      = case when ofi then tm else turma end,
+      turma_norm = case when ofi then public.normalizar_turma(tm) else turma_norm end,
       dados = case when p_dados is null then dados else public.mesclar_dados(dados, p_dados) end,
       atualizado_em = now()
     where id = r.id
@@ -327,6 +365,29 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+-- Conta antiga sem turma reconhecida: o estudante escolhe a turma uma vez.
+-- Quem já está em uma turma não troca sozinho (só a professora troca); recebe de volta a turma que já tem.
+create or replace function public.escolher_turma(p_token uuid, p_turma text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  r  public.alunos;
+  tm text := public.turma_oficial(p_turma);
+begin
+  r := public.aluno_da_sessao(p_token);
+  if r.id is null then return jsonb_build_object('erro', 'SESSAO_INVALIDA'); end if;
+  if tm is null then return jsonb_build_object('erro', 'TURMA_INVALIDA'); end if;
+  if public.turma_oficial(r.turma) is null then
+    begin
+      update public.alunos set turma = tm, turma_norm = public.normalizar_turma(tm), atualizado_em = now()
+      where id = r.id
+      returning * into r;
+    exception when unique_violation then
+      return jsonb_build_object('erro', 'NOME_EM_USO');
+    end;
+  end if;
+  return jsonb_build_object('aluno', public.registro_aluno(r));
+end $$;
+
 create or replace function public.sair(p_token uuid) returns jsonb
 language sql security definer set search_path = public as $$
   delete from public.sessoes where token = p_token;
@@ -346,7 +407,7 @@ begin
       'id', a.id,
       'nome', split_part(a.nome, ' ', 1) ||
               case when position(' ' in a.nome) > 0 then ' ' || left(regexp_replace(a.nome, '^.* ', ''), 1) || '.' else '' end,
-      'turma', a.turma,
+      'turma', coalesce(public.turma_oficial(a.turma), a.turma),
       'personagem', a.dados->'personagem',
       'perfil', jsonb_build_object('apelido', a.dados->'perfil'->'apelido', 'moldura', a.dados->'perfil'->'moldura'),
       'visual', case when jsonb_typeof(a.dados->'visual') = 'object' then a.dados->'visual' else '{}'::jsonb end,
@@ -411,6 +472,7 @@ begin
   for reg in select value from jsonb_each(p_alunos) loop
     nm := public.limpar(reg->>'nome');
     tm := public.limpar(reg->>'turma');
+    tm := coalesce(public.turma_oficial(tm), tm);
     continue when char_length(nm) not between 2 and 40 or char_length(tm) not between 1 and 15;
     select * into r from public.alunos where turma_norm = public.normalizar_turma(tm) and nome_norm = public.normalizar(nm) for update;
     if found then
@@ -451,6 +513,25 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+-- Passa um estudante para outra turma (por exemplo, quem escolheu a turma errada). O progresso não muda.
+create or replace function public.professor_mudar_turma(p_pin text, p_aluno uuid, p_turma text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  st text := public.conferir_pin_professor(p_pin);
+  tm text := public.turma_oficial(p_turma);
+begin
+  if st <> 'OK' then return jsonb_build_object('erro', st); end if;
+  if tm is null then return jsonb_build_object('erro', 'TURMA_INVALIDA'); end if;
+  begin
+    update public.alunos set turma = tm, turma_norm = public.normalizar_turma(tm), atualizado_em = now()
+    where id = p_aluno;
+    if not found then return jsonb_build_object('erro', 'CONTA_NAO_ENCONTRADA'); end if;
+  exception when unique_violation then
+    return jsonb_build_object('erro', 'NOME_EM_USO');
+  end;
+  return jsonb_build_object('ok', true);
+end $$;
+
 -- Atualiza contas antigas para a nova regra de turma ("8A" = "8º A").
 -- Se duas contas antigas virarem a mesma, as duas ficam como estavam.
 do $$
@@ -464,26 +545,47 @@ begin
   end loop;
 end $$;
 
+-- Coloca as contas antigas nas turmas oficiais: "8B", "8°ano B", "B"... viram "8º B". O progresso não muda.
+-- Se a mesma pessoa tiver duas contas que virariam uma só, as duas ficam como estavam (a professora vê no painel).
+-- Contas sem turma reconhecível ("8º ano", "8") ficam como estão: o estudante escolhe a turma no site.
+do $$
+declare
+  r record;
+  o text;
+begin
+  for r in select id, turma, turma_norm from public.alunos loop
+    o := public.turma_oficial(r.turma);
+    continue when o is null or (r.turma = o and r.turma_norm = public.normalizar_turma(o));
+    begin
+      update public.alunos set turma = o, turma_norm = public.normalizar_turma(o) where id = r.id;
+    exception when unique_violation then null;
+    end;
+  end loop;
+end $$;
+
 -- ---------------------------------------------------------
 -- PERMISSÕES: o site (papel "anon") só pode chamar as funções públicas.
 -- ---------------------------------------------------------
 revoke execute on function
   public.normalizar(text), public.normalizar_turma(text), public.limpar(text), public.mesclar_dados(jsonb, jsonb),
+  public.turmas_oficiais(), public.turma_oficial(text),
   public.registro_aluno(public.alunos), public.aluno_da_sessao(uuid), public.conferir_pin_professor(text),
   public.acessar_conta(text, text, text, jsonb, text),
   public.entrar(text, text, text, jsonb), public.entrar_conta(text, text, text, jsonb), public.criar_conta(text, text, text, jsonb),
-  public.salvar_aluno(uuid, jsonb), public.trocar_senha(uuid, text, text),
+  public.salvar_aluno(uuid, jsonb), public.trocar_senha(uuid, text, text), public.escolher_turma(uuid, text),
   public.sair(uuid), public.ranking_publico(uuid), public.painel_dados(text),
   public.professor_alterar_pin(text, text), public.professor_apagar_tudo(text), public.professor_importar(text, jsonb),
-  public.professor_redefinir_senha(text, uuid, text), public.professor_apagar_aluno(text, uuid)
+  public.professor_redefinir_senha(text, uuid, text), public.professor_apagar_aluno(text, uuid),
+  public.professor_mudar_turma(text, uuid, text)
 from public, anon, authenticated;
 
 grant execute on function
   public.entrar(text, text, text, jsonb), public.entrar_conta(text, text, text, jsonb), public.criar_conta(text, text, text, jsonb),
-  public.salvar_aluno(uuid, jsonb), public.trocar_senha(uuid, text, text),
+  public.salvar_aluno(uuid, jsonb), public.trocar_senha(uuid, text, text), public.escolher_turma(uuid, text),
   public.sair(uuid), public.ranking_publico(uuid), public.painel_dados(text),
   public.professor_alterar_pin(text, text), public.professor_apagar_tudo(text), public.professor_importar(text, jsonb),
-  public.professor_redefinir_senha(text, uuid, text), public.professor_apagar_aluno(text, uuid)
+  public.professor_redefinir_senha(text, uuid, text), public.professor_apagar_aluno(text, uuid),
+  public.professor_mudar_turma(text, uuid, text)
 to anon, authenticated;
 
 -- Remove a função de dar XP pelo painel, caso tenha sido criada antes.

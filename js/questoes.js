@@ -1,10 +1,3 @@
-/* =========================================================
-   BANCO DE QUESTÕES — Conectados com o Dinheiro
-   Cada questão é GERADA na hora: números, nomes, produtos,
-   ordem das questões e ordem das alternativas são sorteados.
-   Assim, cada estudante (e cada tentativa) recebe uma prova diferente.
-   ========================================================= */
-
 const R = {
   int(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; },
   pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; },
@@ -43,7 +36,6 @@ const NOMES = ['Ana', 'Caio', 'Luana', 'Davi', 'Yara', 'Pedro', 'Maria', 'Kauã'
 const LOJAS = ['Loja Tucano', 'MegaShop Arara', 'Clique Barato', 'Mercado Ipê', 'Shop Jacarandá', 'Vitrine Caju'];
 const COMIDAS = ['pizza', 'hambúrguer', 'açaí', 'tapioca', 'cuscuz recheado', 'pastel'];
 
-/* Monta as alternativas: remove repetidas/inválidas, completa até 4 e embaralha. */
 function montar(correta, distratores, fmt) {
   const vistos = new Set([fmt(correta)]);
   const ops = [correta];

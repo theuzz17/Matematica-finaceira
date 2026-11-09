@@ -119,8 +119,11 @@ function tempoRestante() {
   return h <= 24 ? `Termina em ${h} h` : `Termina em ${Math.ceil(ms / 864e5)} dias`;
 }
 
-/* ---------------- TELA DO RANKING ---------------- */
+/* ---------------- TELA DO RANKING ----------------
+   Patentes e Turma: só os colegas da mesma turma. Geral: todas as turmas juntas. */
 let abaRanking = 'patente';
+let periodoTurma = 'semana';   // aba Turma: 'semana' (XP desta semana) ou 'total' (desde o início)
+const daMinhaTurma = a => chaveTurma(a.turma) === chaveTurma(aluno.turma);
 
 function abrirRanking() {
   renderRanking();
@@ -140,7 +143,11 @@ function renderRanking() {
   $('#rk-xp').textContent = xpDaSemana(aluno);
   const el = $('#ranking-conteudo');
   el.innerHTML = abaRanking === 'patente' ? htmlPatente() : abaRanking === 'turma' ? htmlTurma() : htmlGeral();
-  el.onclick = e => { const b = e.target.closest('[data-aluno]'); if (b) abrirMiniPerfil(b.dataset.aluno); };
+  el.onclick = e => {
+    const b = e.target.closest('[data-aluno]'); if (b) abrirMiniPerfil(b.dataset.aluno);
+    if (e.target.closest('#rk-escolher-turma')) abrirEscolhaTurma();
+  };
+  el.onchange = e => { if (e.target.name === 'rk-periodo') { periodoTurma = e.target.value; renderRanking(); } };
 }
 
 function centralizarFaixaLigas() {
@@ -153,23 +160,24 @@ function linhaRanking(a, pos, xp) {
   return `<button class="rk-linha ${eu ? 'eu' : ''}" data-aluno="${esc(a.id)}" style="animation-delay:${Math.min(pos, 12) * 35}ms">
     <span class="rk-pos">${['🥇', '🥈', '🥉'][pos - 1] || pos}</span>
     <span class="rk-avatar">${avatarAluno(a, 'rk')}</span>
-    <span class="rk-nome"><b>${esc(nomePublico(a))}${eu ? ' <small class="voce">você</small>' : ''}</b><small>Turma ${esc(a.turma)}</small></span>
+    <span class="rk-nome"><b>${esc(nomePublico(a))}${eu ? ' <small class="voce">você</small>' : ''}</b>${tagTurma(a.turma)}</span>
     <span class="rk-xp"><span class="rk-escudo" title="Patente ${PATENTES[patenteDe(a)].nome}">${escudoPatente(patenteDe(a))}</span>${xp} XP</span></button>`;
 }
 
-function podio(lista) {
+function podio(lista, comTurma) {
   return `<div class="podio">${lista.slice(0, 3).map((g, i) => `
     <button class="podio-lugar p${i + 1} ${g.a.id === aluno.id ? 'eu' : ''}" data-aluno="${esc(g.a.id)}">
       <span class="podio-avatar">${avatarAluno(g.a, 'podio')}${i === 0 ? '<span class="coroa">👑</span>' : ''}</span>
       <b>${esc(nomePublico(g.a))}</b>
+      ${comTurma ? tagTurma(g.a.turma) : ''}
       <small class="podio-xp"><span class="rk-escudo" title="Patente ${PATENTES[patenteDe(g.a)].nome}">${escudoPatente(patenteDe(g.a))}</span>${g.xp} XP</small>
       <span class="podio-bloco">${i + 1}</span>
     </button>`).join('')}</div>`;
 }
 
 // Pódio com os 3 primeiros e, embaixo, a lista completa com TODO mundo (do 1º ao último).
-function classificacao(lista) {
-  return `${podio(lista)}
+function classificacao(lista, comTurma = false) {
+  return `${podio(lista, comTurma)}
     ${lista.length ? `<h3 class="rk-subtitulo">Classificação completa <small>${lista.length} ${lista.length === 1 ? 'pessoa' : 'pessoas'}</small></h3>` : ''}
     <div class="rk-lista">${lista.map((g, i) => linhaRanking(g.a, i + 1, g.xp)).join('')}</div>
     ${lista.length < 2 ? avisoSozinho() : ''}`;
@@ -180,9 +188,10 @@ const avisoSozinho = () => Banco.ativo
   : '<p class="aviso rk-aviso">👋 Por enquanto só você aparece aqui. O ranking mostra quem joga neste aparelho. A professora pode juntar os dados de vários aparelhos pelo painel pedagógico.</p>';
 
 function htmlPatente() {
-  const info = infoPatente(aluno), P = info.atual, todos = alunosRanking();
+  const info = infoPatente(aluno), P = info.atual, todos = alunosRanking().filter(daMinhaTurma);
   const grupo = todos.filter(a => patenteDe(a) === info.n).map(a => ({ a, xp: xpTotal(a) })).sort(ordenarXP);
   const porPatente = PATENTES.map((_, i) => todos.filter(a => patenteDe(a) === i).length);
+  const turma = turmaOficial(aluno.turma) ? `do ${esc(nomeTurma(aluno.turma))}` : 'da sua turma';
   return `
     <div class="faixa-ligas" id="faixa-ligas">${PATENTES.map((p, i) => `<div class="escudo-item ${i === info.n ? 'atual' : ''}" title="Patente ${p.nome}: ${p.xp} XP">${escudoPatente(i, i <= info.n)}</div>`).join('')}</div>
     <div class="liga-titulo"><h2>Patente ${P.nome}</h2>
@@ -191,29 +200,40 @@ function htmlPatente() {
            <div class="patente-progresso"><span class="barra"><i style="width:${info.pct.toFixed(1)}%"></i></span><small>${info.xp} de ${info.prox.xp} XP</small></div>`
         : `<p>Você chegou à patente mais alta do jogo, com ${info.xp} XP! 💎</p>`}
     </div>
-    <h3 class="rk-subtitulo">Colegas na Patente ${P.nome}</h3>
+    <h3 class="rk-subtitulo">Colegas ${turma} na Patente ${P.nome}</h3>
     <div class="rk-lista">${grupo.map((g, i) => linhaRanking(g.a, i + 1, g.xp)).join('')}</div>
-    ${grupo.length >= 2 ? '' : todos.length < 2 ? avisoSozinho() : `<p class="aviso rk-aviso">🚀 Você é a única pessoa na Patente ${P.nome} por enquanto. Veja todo mundo nas abas Turma e Geral.</p>`}
+    ${grupo.length >= 2 ? '' : todos.length < 2 ? avisoSozinho() : `<p class="aviso rk-aviso">🚀 Você é a única pessoa ${turma} na Patente ${P.nome} por enquanto. Veja a turma toda na aba Turma, e todas as turmas na aba Geral.</p>`}
     <details class="rk-regras" open><summary>Como funcionam as patentes?</summary>
-      <p class="rk-regras-texto">Cada acerto vale XP: 10 no fácil, 15 no médio e 20 no difícil. Repetir uma fase também soma. A patente sobe na hora em que você junta o XP e nunca desce.</p>
+      <p class="rk-regras-texto">Cada acerto vale XP: 10 no fácil, 15 no médio e 20 no difícil. Repetir uma fase também soma. A patente sobe na hora em que você junta o XP e nunca desce. Ao lado de cada patente está quantas pessoas ${turma} estão nela.</p>
       <ul class="escada-patentes">${PATENTES.map((p, i) => `
         <li class="${i === info.n ? 'atual' : i < info.n ? 'feita' : ''}">${escudoPatente(i, i <= info.n)}
           <b>${p.nome}</b><span>${p.xp} XP</span><small>${porPatente[i]} ${porPatente[i] === 1 ? 'pessoa' : 'pessoas'}</small></li>`).join('')}
       </ul></details>`;
 }
 
+// Ranking só da minha turma: XP desta semana (recomeça toda segunda) ou desde o início.
 function htmlTurma() {
-  const semana = chaveSemana(new Date()), minha = normalizarTurma(aluno.turma);
-  const lista = alunosRanking().filter(a => normalizarTurma(a.turma) === minha)
-    .map(a => ({ a, xp: xpDaSemana(a, semana) })).sort(ordenarXP);
-  return `<div class="rk-cabecalho"><h2>Turma ${esc(aluno.turma)}</h2><p>XP ganho nesta semana · ⏳ ${tempoRestante()}</p></div>
+  if (!turmaOficial(aluno.turma)) {
+    return `<div class="rk-cabecalho"><h2>Qual é a sua turma?</h2><p>Escolha a sua turma para ver o ranking dos colegas.</p></div>
+      <button class="btn btn-primario btn-grande rk-escolher" id="rk-escolher-turma">👥 Escolher minha turma</button>`;
+  }
+  const semana = chaveSemana(new Date()), total = periodoTurma === 'total';
+  const lista = alunosRanking().filter(daMinhaTurma)
+    .map(a => ({ a, xp: total ? xpTotal(a) : xpDaSemana(a, semana) })).sort(ordenarXP);
+  return `<div class="rk-cabecalho"><h2>Turma ${esc(nomeTurma(aluno.turma))}</h2>
+      <p>${total ? 'XP total desde o início' : `XP ganho nesta semana · ⏳ ${tempoRestante()}`}</p></div>
+    <div class="segmentado rk-periodo" role="radiogroup" aria-label="Período do ranking">
+      <label><input type="radio" name="rk-periodo" value="semana" ${total ? '' : 'checked'}><span>📅 Esta semana</span></label>
+      <label><input type="radio" name="rk-periodo" value="total" ${total ? 'checked' : ''}><span>🏅 Desde o início</span></label>
+    </div>
     ${classificacao(lista)}`;
 }
 
+// Ranking geral: todas as turmas juntas, pelo XP total.
 function htmlGeral() {
   const lista = alunosRanking().map(a => ({ a, xp: xpTotal(a) })).sort(ordenarXP);
-  return `<div class="rk-cabecalho"><h2>Todos os tempos</h2><p>XP total de todas as turmas</p></div>
-    ${classificacao(lista)}`;
+  return `<div class="rk-cabecalho"><h2>Geral</h2><p>${TURMAS.map(tagTurma).join(' ')} juntas · XP total desde o início</p></div>
+    ${classificacao(lista, true)}`;
 }
 
 function abrirMiniPerfil(id) {
@@ -222,7 +242,7 @@ function abrirMiniPerfil(id) {
   abrirModal(`<div class="mini-perfil">
     <div class="mini-avatar">${avatarAluno(a, 'mini')}</div>
     <h2>${esc(nomePublico(a))}</h2>
-    <p class="perfil-sub">Turma ${esc(a.turma)} · Nível ${nivelDe(xpTotal(a)).n}</p>
+    <p class="perfil-sub">${tagTurma(a.turma)} · Nível ${nivelDe(xpTotal(a)).n}</p>
     <div class="mini-liga">${escudoPatente(nivel)}<span>Patente ${PATENTES[nivel].nome}</span></div>
     <div class="grade-stats mini">
       ${tileStat('🔥', of.dias, of.dias === 1 ? 'dia de ofensiva' : 'dias de ofensiva', of.hoje ? 'fogo' : 'apagado')}

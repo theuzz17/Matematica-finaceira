@@ -1,10 +1,3 @@
-/* =========================================================
-   MAIS QUESTÕES — tipos novos para todos os conteúdos.
-   Cada questão entra no banco do seu conteúdo: as fases
-   sorteiam entre mais tipos e repetem menos.
-   ========================================================= */
-
-/* ---------------- MUNDO 1 ---------------- */
 G_PORCENTAGEM.push(
   () => {
     const total = R.pick([2, 4, 5, 8, 10, 20]);

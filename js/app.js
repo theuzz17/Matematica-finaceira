@@ -65,7 +65,29 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 const normalizar = s => s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
 // Turma: "8º A", "8A", "8 a", "8° A" e "8º ano A" viram todas "8a" (mesma regra do banco).
 const normalizarTurma = s => String(s).toLowerCase().replace(/[ºª°]/g, '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\bano\b/g, '').replace(/[^a-z0-9]/g, '');
-const chaveConta = (turma, nome) => normalizarTurma(turma) + '|' + normalizar(nome);
+// Turma oficial (uma das TURMAS) escrita de qualquer jeito: "8B", "8°ano B", "oitavo B" e "B" viram "8º B".
+// Nulo quando não dá para saber ("8º ano", "8"). Mesma regra de turma_oficial() no banco.
+function turmaOficial(t) {
+  const n = normalizarTurma(t || '').replace(/^(turma)?(8|oitavo)?(ano|serie)?(turma)?/, '8');
+  return TURMAS.find(o => normalizarTurma(o) === n) || null;
+}
+const chaveTurma = t => normalizarTurma(turmaOficial(t) || t);
+const nomeTurma = t => turmaOficial(t) || String(t || '');
+const chaveConta = (turma, nome) => chaveTurma(turma) + '|' + normalizar(nome);
+// Conta antiga com a turma escrita de um jeito que não dá para reconhecer: vale pelo nome.
+const contaSemTurma = (a, nome) => !turmaOficial(a.turma) && normalizar(a.nome) === normalizar(nome);
+const listaTurmas = () => TURMAS.length > 1 ? `${TURMAS.slice(0, -1).join(', ')} e ${TURMAS[TURMAS.length - 1]}` : TURMAS[0];
+
+const CORES_TURMA = [
+  { cor: '#1d4ed8', fundo: '#dbeafe' }, { cor: '#c2410c', fundo: '#ffedd5' }, { cor: '#7e22ce', fundo: '#f3e8ff' },
+  { cor: '#15803d', fundo: '#dcfce7' }, { cor: '#be185d', fundo: '#fce7f3' },
+];
+const corTurma = t => CORES_TURMA[TURMAS.indexOf(turmaOficial(t)) % CORES_TURMA.length] || { cor: '#475569', fundo: '#e2e8f0' };
+const estiloTurma = t => `--tt:${corTurma(t).cor};--tt-fundo:${corTurma(t).fundo}`;
+const tagTurma = t => `<span class="tag-turma" style="${estiloTurma(t)}">${esc(nomeTurma(t))}</span>`;
+// Botões de escolher a turma (login, conta antiga sem turma).
+const radiosTurma = (nome, marcada) => TURMAS.map(t => `
+  <label style="${estiloTurma(t)}"><input type="radio" name="${nome}" value="${esc(t)}" ${t === marcada ? 'checked' : ''}><span><i class="ponto-turma"></i>${esc(t)}</span></label>`).join('');
 
 function salvarAluno() { dados.alunos[aluno.id] = aluno; Store.salvar(dados); Sync.agendar(); }
 
@@ -133,11 +155,16 @@ function lembrarUltimoLogin(nome, turma) { try { localStorage.setItem(CHAVE + '_
 function preencherUltimoLogin() {
   try {
     const u = JSON.parse(localStorage.getItem(CHAVE + '_ultimo'));
-    if (u?.nome) { $('#login-nome').value = u.nome; $('#login-turma').value = u.turma || ''; }
+    if (u?.nome) {
+      $('#login-nome').value = u.nome;
+      const t = turmaOficial(u.turma);
+      document.querySelectorAll('[name=login-turma]').forEach(r => { r.checked = r.value === t; });
+    }
   } catch { /* sem armazenamento */ }
 }
 
 function iniciarLogin() {
+  $('#login-turmas').innerHTML = radiosTurma('login-turma');
   document.querySelectorAll('.abas-login .aba').forEach(b => b.onclick = () => trocarModoLogin(b.dataset.modo));
   trocarModoLogin('entrar');
   preencherUltimoLogin();
@@ -146,9 +173,10 @@ function iniciarLogin() {
     e.preventDefault();
     const modo = modoLogin;
     const nome = $('#login-nome').value.trim().replace(/\s+/g, ' ');
-    const turma = $('#login-turma').value.trim().replace(/\s+/g, ' ');
+    const turma = document.querySelector('[name=login-turma]:checked')?.value || '';
     const pin = $('#login-pin').value.trim();
-    if (nome.length < 2 || !turma || !/^\d{4}$/.test(pin)) { erroLogin('Preencha nome, turma e uma senha de 4 números.'); return; }
+    if (!turma) { erroLogin(`Escolha a sua turma: ${listaTurmas()}.`); return; }
+    if (nome.length < 2 || !/^\d{4}$/.test(pin)) { erroLogin('Preencha seu nome e uma senha de 4 números.'); return; }
     if (modo === 'criar' && $('#login-pin2').value.trim() !== pin) { erroLogin('As duas senhas não são iguais. Digite de novo.'); return; }
     const entrou = () => {
       lembrarUltimoLogin(nome, turma);
@@ -174,17 +202,19 @@ function iniciarLogin() {
     }
 
     // Modo do aparelho. Procura pelo nome atual (o estudante pode ter trocado o nome no perfil).
-    const chave = chaveConta(turma, nome);
-    const existente = Object.values(dados.alunos).find(a => chaveConta(a.turma, a.nome) === chave);
+    // Conta antiga sem turma reconhecida também vale: ela entra na turma escolhida agora.
+    const chave = chaveConta(turma, nome), contas = Object.values(dados.alunos);
+    const existente = contas.find(a => chaveConta(a.turma, a.nome) === chave) || contas.find(a => contaSemTurma(a, nome));
     if (modo === 'entrar') {
       if (!existente) {
         erroLogin(Banco.ativo
           ? 'Sem internet, só dá para entrar em contas já usadas neste aparelho. Conecte-se e tente de novo.'
-          : 'Não encontramos uma conta com esse nome nesta turma neste aparelho. Confira como você escreveu ou crie uma conta.', Banco.ativo ? null : 'criar');
+          : 'Não encontramos uma conta com esse nome nesta turma neste aparelho. Confira o nome e se você escolheu a turma certa, ou crie uma conta.', Banco.ativo ? null : 'criar');
         return;
       }
       if (existente.pin !== pin) { erroLogin('Senha incorreta para este nome e turma.'); return; }
       aluno = existente;
+      if (!Banco.ativo && !turmaOficial(aluno.turma)) { aluno.turma = turma; salvarAluno(); }
     } else {
       if (existente) { erroLogin('Já existe uma conta com esse nome nesta turma. Se é sua, use "Entrar" com a sua senha.', 'entrar'); return; }
       let id = chave, n = 2;
@@ -255,7 +285,49 @@ function verificarComemoracoes() {
   const mundo = mundoParaCelebrar();
   if (mundo) { celebrarMundo(mundo); return; }
   const patente = patenteParaCelebrar();
-  if (patente) celebrarPatente(patente);
+  if (patente) { celebrarPatente(patente); return; }
+  pedirTurmaSePrecisar();
+}
+
+/* ---------------- TURMA DE CONTA ANTIGA ----------------
+   Quem criou a conta antes das turmas fixas e escreveu a turma de um jeito que não dá para
+   reconhecer ("8º ano", "8") escolhe a turma uma vez. Depois, só a professora troca. */
+let turmaPedida = false;
+function pedirTurmaSePrecisar() {
+  if (turmaPedida || !aluno || turmaOficial(aluno.turma) || $('#modal').classList.contains('aberto') || !$('#tela-trilha').classList.contains('ativa')) return;
+  turmaPedida = true;
+  abrirEscolhaTurma();
+}
+
+function abrirEscolhaTurma() {
+  abrirModal(`<div class="escolha-turma">
+    <span class="et-icone" aria-hidden="true">👥</span>
+    <h2>Qual é a sua turma?</h2>
+    <p>Agora o jogo tem as turmas ${esc(listaTurmas())}, e cada uma tem o seu ranking. Escolha a sua para aparecer junto com os colegas.</p>
+    <div class="segmentado seg-turma" id="et-turmas" role="radiogroup" aria-label="Sua turma">${radiosTurma('et-turma')}</div>
+    <p class="dica">Depois de escolher, só a professora pode trocar.</p>
+    <p class="erro" id="et-erro"></p>
+    <button class="btn btn-primario btn-grande" id="et-salvar" disabled>Escolha a turma</button>
+    <button class="btn btn-texto" onclick="fecharModal()">Agora não</button></div>`);
+  const escolhida = () => document.querySelector('[name=et-turma]:checked')?.value;
+  const botao = $('#et-salvar');
+  $('#et-turmas').onchange = () => { botao.disabled = false; botao.textContent = `Sou do ${escolhida()}`; $('#et-erro').textContent = ''; };
+  botao.onclick = async () => {
+    const t = escolhida(); if (!t) return;
+    botao.disabled = true; botao.textContent = 'Salvando...';
+    try {
+      await definirTurma(t);
+    } catch (falha) {
+      $('#et-erro').textContent = falha.codigo === 'NOME_EM_USO' ? `Já existe uma conta com o seu nome no ${t}. Fale com a professora.`
+        : falha.codigo === 'SEM_CONEXAO' ? 'Para escolher a turma é preciso estar com internet.' : mensagemErro(falha);
+      botao.disabled = false; botao.textContent = `Sou do ${t}`;
+      return;
+    }
+    fecharModal();
+    const agora = nomeTurma(aluno.turma);
+    toast(agora === t ? `👥 Pronto! Você está no ${esc(t)}.` : `👥 Você já está no ${esc(agora)}. Para trocar, fale com a professora.`);
+    if ($('#tela-ranking').classList.contains('ativa')) renderRanking();
+  };
 }
 
 const BRILHOS_CEL = [[8, 18, 0], [86, 14, 0.4], [14, 62, 0.8], [90, 56, 0.2], [30, 8, 1.1], [70, 84, 0.6], [6, 86, 1.3], [94, 88, 0.9]]
@@ -835,7 +907,7 @@ function resumoAluno(a) {
   const resp = a.tentativas.flatMap(t => t.respostas);
   const acertos = resp.filter(r => r.acertou).length;
   return {
-    nome: a.nome, turma: a.turma, personagem: (personagemDe(a.personagem) || {}).nome || '-',
+    id: a.id, nome: a.nome, turma: nomeTurma(a.turma), semTurma: !turmaOficial(a.turma), personagem: (personagemDe(a.personagem) || {}).nome || '-',
     pontos: totalPontos(a), estrelas: totalEstrelas(a), fases: fasesConcluidas(a), tentativas: a.tentativas.length,
     respondidas: resp.length, acertos, taxa: resp.length ? Math.round(acertos / resp.length * 100) : 0,
     moedas: calcularMoedas(a).saldo, itens: comprasDe(a).length, xp: xpTotal(a), patente: PATENTES[patenteDe(a)].nome,
@@ -850,16 +922,20 @@ function abrirPainel() {
   $('#painel-aviso').textContent = Banco.ativo
     ? '☁️ Dados do banco de dados online: aparecem os estudantes de todos os aparelhos.'
     : 'Os dados ficam salvos apenas neste navegador. Para juntar os resultados de vários aparelhos, exporte o backup em cada um e importe aqui.';
-  const turmas = [...new Set(Object.values(painelDados.alunos).map(a => a.turma))].sort();
-  $('#painel-turma').innerHTML = `<option value="">Todas as turmas</option>` + turmas.map(t => `<option>${esc(t)}</option>`).join('');
-  $('#painel-turma').onchange = renderPainel;
+  // Filtro: as turmas oficiais e, se houver, as contas antigas que ainda não têm turma.
+  const filtro = $('#painel-turma'), antes = filtro.value;
+  const semTurma = Object.values(painelDados.alunos).some(a => !turmaOficial(a.turma));
+  filtro.innerHTML = `<option value="">Todas as turmas</option>` + TURMAS.map(t => `<option>${esc(t)}</option>`).join('')
+    + (semTurma ? '<option value="?">⚠️ Sem turma definida</option>' : '');
+  if ([...filtro.options].some(o => o.value === antes)) filtro.value = antes;
+  filtro.onchange = renderPainel;
   renderPainel();
   mostrar('tela-professor');
 }
 
 function alunosFiltrados() {
   const t = $('#painel-turma').value;
-  return Object.values(painelDados.alunos).filter(a => !t || a.turma === t);
+  return Object.values(painelDados.alunos).filter(a => !t || (t === '?' ? !turmaOficial(a.turma) : turmaOficial(a.turma) === t));
 }
 
 function renderPainel() {
@@ -868,8 +944,12 @@ function renderPainel() {
   const resp = lista.flatMap(a => a.tentativas.flatMap(t => t.respostas));
   const acertos = resp.filter(r => r.acertou).length;
 
+  // Com "Todas as turmas", mostra quantos estudantes há em cada turma.
+  const nSemTurma = lista.filter(a => !turmaOficial(a.turma)).length;
+  const porTurma = $('#painel-turma').value ? '' : [...TURMAS.map(t => `${esc(t)}: ${lista.filter(a => turmaOficial(a.turma) === t).length}`),
+    ...(nSemTurma ? [`⚠️ sem turma: ${nSemTurma}`] : [])].join(' · ');
   $('#painel-tiles').innerHTML = `
-    <div class="tile"><small>Estudantes</small><b>${lista.length}</b></div>
+    <div class="tile"><small>Estudantes</small><b>${lista.length}</b>${porTurma ? `<span class="tile-extra">${porTurma}</span>` : ''}</div>
     <div class="tile"><small>Tentativas de fase</small><b>${lista.reduce((s, a) => s + a.tentativas.length, 0)}</b></div>
     <div class="tile"><small>Questões respondidas</small><b>${resp.length}</b></div>
     <div class="tile"><small>Taxa média de acerto</small><b>${resp.length ? Math.round(acertos / resp.length * 100) : 0}%</b></div>`;
@@ -898,7 +978,7 @@ function renderPainel() {
 
   // Alunos
   $('#tabela-alunos').innerHTML = resumos.length ? `<table><thead><tr><th>#</th><th>Estudante</th><th>Turma</th><th>Pontos</th><th>★</th><th>Fases</th><th>Tentativas</th><th>% acerto</th><th>XP</th><th>Patente</th><th>Moedas</th><th>Meta</th></tr></thead><tbody>
-    ${resumos.map((r, n) => `<tr class="clicavel" data-id="${esc(lista.find(a => a.nome === r.nome && a.turma === r.turma).id)}"><td>${n + 1}</td><td>${esc(r.nome)}</td><td>${esc(r.turma)}</td><td>${r.pontos}</td><td>${r.estrelas}</td><td>${r.fases}/${FASES.length}</td><td>${r.tentativas}</td><td>${r.taxa}%</td><td>${r.xp}</td><td>${r.patente}</td><td>${r.moedas}</td><td>${esc(r.meta)}</td></tr>`).join('')}
+    ${resumos.map((r, n) => `<tr class="clicavel" data-id="${esc(r.id)}"><td>${n + 1}</td><td>${esc(r.nome)}</td><td>${r.semTurma ? `⚠️ ${esc(r.turma)}` : esc(r.turma)}</td><td>${r.pontos}</td><td>${r.estrelas}</td><td>${r.fases}/${FASES.length}</td><td>${r.tentativas}</td><td>${r.taxa}%</td><td>${r.xp}</td><td>${r.patente}</td><td>${r.moedas}</td><td>${esc(r.meta)}</td></tr>`).join('')}
     </tbody></table>` : `<p class="vazio">Nenhum estudante cadastrado ${Banco.ativo ? 'no banco' : 'neste aparelho'} ainda.</p>`;
   $('#tabela-alunos').onclick = e => { const tr = e.target.closest('tr.clicavel'); if (tr) abrirHistorico(tr.dataset.id); };
 }
@@ -907,10 +987,16 @@ function abrirHistorico(id) {
   const a = painelDados.alunos[id];
   abrirModal(`
     <h2>📈 Histórico de ${esc(a.nome)}</h2>
-    <p>Turma ${esc(a.turma)} · ${totalPontos(a)} pontos · maior sequência: ${a.maiorSequencia || 0}</p>
+    <p>Turma ${esc(nomeTurma(a.turma))} · ${totalPontos(a)} pontos · maior sequência: ${a.maiorSequencia || 0}</p>
     <div class="tabela-rolagem">${a.tentativas.length ? `<table><thead><tr><th>Data</th><th>Fase</th><th>Acertos</th><th>Pontos</th><th>★</th></tr></thead><tbody>
       ${a.tentativas.slice().reverse().map(t => `<tr><td>${new Date(t.data).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${esc(t.fase)}</td><td>${t.acertos}/${t.total}</td><td>${t.pontos}</td><td>${t.estrelas}</td></tr>`).join('')}
       </tbody></table>` : '<p class="vazio">Nenhuma tentativa ainda.</p>'}</div>
+    <div class="mudar-turma">
+      <label class="campo">Turma do estudante
+        <select id="hist-turma">${turmaOficial(a.turma) ? '' : `<option value="" selected disabled>⚠️ ${esc(a.turma)} (sem turma)</option>`}${TURMAS.map(t => `<option ${turmaOficial(a.turma) === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      </label>
+      <button class="btn btn-secundario" id="btn-mudar-turma">👥 Mudar turma</button>
+    </div>
     <button class="btn btn-secundario btn-grande" id="btn-nova-senha">🔑 Criar senha nova para este estudante</button>
     <button class="btn btn-perigo btn-grande" id="btn-apagar-aluno">🗑️ Apagar esta conta</button>
     <button class="btn btn-texto" onclick="fecharModal()">Fechar</button>`);
@@ -923,6 +1009,21 @@ function abrirHistorico(id) {
     delete painelDados.alunos[id];
     if (dados.alunos[id]) { delete dados.alunos[id]; Store.salvar(dados); }
     fecharModal(); abrirPainel(); toast(`🗑️ Conta de ${esc(a.nome)} apagada.`);
+  };
+  $('#btn-mudar-turma').onclick = async () => {
+    const nova = $('#hist-turma').value;
+    if (!nova || nova === turmaOficial(a.turma)) { toast(`${esc(a.nome)} já está no ${esc(nomeTurma(a.turma))}.`); return; }
+    if (!confirm(`Passar ${a.nome} para a turma ${nova}? O progresso continua o mesmo.`)) return;
+    const emUso = `Já existe uma conta com o nome ${a.nome} na turma ${nova}. Apague a conta repetida antes de mudar.`;
+    if (Banco.ativo) {
+      try { await Banco.rpc('professor_mudar_turma', { p_pin: pinProfessor, p_aluno: id, p_turma: nova }); }
+      catch (falha) { alert(falha.codigo === 'NOME_EM_USO' ? emUso : mensagemErro(falha)); return; }
+    } else if (Object.values(dados.alunos).some(o => o.id !== id && chaveConta(o.turma, o.nome) === chaveConta(nova, a.nome))) {
+      alert(emUso); return;
+    }
+    a.turma = nova;
+    if (dados.alunos[id]) { dados.alunos[id].turma = nova; Store.salvar(dados); }
+    fecharModal(); abrirPainel(); toast(`👥 ${esc(a.nome)} agora está no ${esc(nova)}.`);
   };
   $('#btn-nova-senha').onclick = async () => {
     const nova = prompt(`Nova senha de ${a.nome} (4 números):`);
