@@ -142,7 +142,7 @@ function renderRanking() {
   });
   $('#rk-xp').textContent = xpDaSemana(aluno);
   const el = $('#ranking-conteudo');
-  el.innerHTML = abaRanking === 'patente' ? htmlPatente() : abaRanking === 'turma' ? htmlTurma() : htmlGeral();
+  el.innerHTML = avisoAprovacao() + (abaRanking === 'patente' ? htmlPatente() : abaRanking === 'turma' ? htmlTurma() : htmlGeral());
   el.onclick = e => {
     const b = e.target.closest('[data-aluno]'); if (b) abrirMiniPerfil(b.dataset.aluno);
     if (e.target.closest('#rk-escolher-turma')) abrirEscolhaTurma();
@@ -183,7 +183,13 @@ function classificacao(lista, comTurma = false) {
     ${lista.length < 2 ? avisoSozinho() : ''}`;
 }
 
-const avisoSozinho = () => Banco.ativo
+// Conta que espera a professora confirmar a turma: joga normalmente, mas ainda não aparece no ranking.
+const avisoAprovacao = () => aguardandoAprovacao(aluno)
+  ? `<div class="rk-espera" role="status"><span aria-hidden="true">⏳</span><p><b>Sua turma ainda vai ser confirmada.</b>
+      A professora precisa confirmar que você é do ${esc(nomeTurma(aluno.turma))}. Até lá, você joga normalmente e o seu progresso fica salvo, mas o seu nome ainda não aparece no ranking.</p></div>`
+  : '';
+
+const avisoSozinho = () => aguardandoAprovacao(aluno) ? '' : Banco.ativo
   ? '<p class="aviso rk-aviso">👋 Por enquanto só você está no ranking. Chame os colegas para jogar!</p>'
   : '<p class="aviso rk-aviso">👋 Por enquanto só você aparece aqui. O ranking mostra quem joga neste aparelho. A professora pode juntar os dados de vários aparelhos pelo painel pedagógico.</p>';
 
@@ -202,7 +208,7 @@ function htmlPatente() {
     </div>
     <h3 class="rk-subtitulo">Colegas ${turma} na Patente ${P.nome}</h3>
     <div class="rk-lista">${grupo.map((g, i) => linhaRanking(g.a, i + 1, g.xp)).join('')}</div>
-    ${grupo.length >= 2 ? '' : todos.length < 2 ? avisoSozinho() : `<p class="aviso rk-aviso">🚀 Você é a única pessoa ${turma} na Patente ${P.nome} por enquanto. Veja a turma toda na aba Turma, e todas as turmas na aba Geral.</p>`}
+    ${grupo.length >= 2 || aguardandoAprovacao(aluno) ? '' : todos.length < 2 ? avisoSozinho() : `<p class="aviso rk-aviso">🚀 Você é a única pessoa ${turma} na Patente ${P.nome} por enquanto. Veja a turma toda na aba Turma, e todas as turmas na aba Geral.</p>`}
     <details class="rk-regras" open><summary>Como funcionam as patentes?</summary>
       <p class="rk-regras-texto">Cada acerto vale XP: 10 no fácil, 15 no médio e 20 no difícil. Repetir uma fase também soma. A patente sobe na hora em que você junta o XP e nunca desce. Ao lado de cada patente está quantas pessoas ${turma} estão nela.</p>
       <ul class="escada-patentes">${PATENTES.map((p, i) => `

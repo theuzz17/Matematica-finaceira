@@ -156,7 +156,8 @@ function abrirEditarPerfil() {
       <label class="campo">Nome<input id="pf-nome" maxlength="40" autocapitalize="words" value="${esc(aluno.nome)}" required></label>
       <label class="campo">Apelido no ranking <span class="opcional">(opcional)</span><input id="pf-apelido" maxlength="20" value="${esc(aluno.perfil?.apelido || '')}" placeholder="Ex.: Mestre do Pix"></label>
       <p class="dica">No ranking aparece o apelido. Sem apelido, aparece o primeiro nome e a inicial do sobrenome.</p>
-      <p class="campo-fixo">Turma: <b>${esc(nomeTurma(aluno.turma))}</b><small class="campo-fixo-dica">${turmaOficial(aluno.turma) ? 'Turma errada? Peça para a professora trocar.' : 'Sua turma ainda não foi escolhida: escolha na aba Turma do ranking.'}</small></p>
+      <p class="campo-fixo">Turma: <b>${esc(nomeTurma(aluno.turma))}</b><small class="campo-fixo-dica">${!turmaOficial(aluno.turma) ? 'Sua turma ainda não foi escolhida: escolha na aba Turma do ranking.'
+        : aguardandoAprovacao(aluno) ? '⏳ Esperando a professora confirmar a sua turma. Turma errada? Avise a professora.' : 'Turma errada? Peça para a professora trocar.'}</small></p>
       <details class="troca-senha"><summary>🔐 Trocar senha</summary>
         <label class="campo">Senha atual<input id="pf-senha-atual" type="password" inputmode="numeric" maxlength="4"></label>
         <label class="campo">Nova senha (4 números)<input id="pf-senha-nova" type="password" inputmode="numeric" maxlength="4"></label>

@@ -18,8 +18,12 @@ const MENSAGENS_BANCO = {
   BLOQUEADO: 'Muitas tentativas erradas. Espere 15 minutos e tente de novo.',
   NOME_EM_USO: 'Já existe alguém com esse nome nesta turma.',
   PIN_INCORRETO: 'PIN incorreto.',
+  LOGIN_INCORRETO: 'E-mail ou senha incorretos.',
+  SESSAO_PROFESSOR_INVALIDA: 'Sua sessão no painel acabou. Saia e entre de novo.',
+  SENHA_CURTA: 'A nova senha precisa ter pelo menos 6 caracteres.',
   DADOS_INVALIDOS: 'Confira os dados digitados.',
   SESSAO_INVALIDA: 'Sua sessão expirou. Entre de novo.',
+  CONTA_APAGADA: 'Esta conta foi apagada pela professora.',
   SEM_CONEXAO: 'Sem conexão com a internet. Tente de novo.',
   SERVIDOR: 'O banco de dados não respondeu. Tente de novo em instantes.',
 };
@@ -56,6 +60,11 @@ const semSenha = a => { const { pin, ...resto } = a; return resto; };
 // Garante os campos que o site espera, mesmo numa conta recém-criada no banco.
 const comPadroes = reg => ({ personagem: null, fases: {}, tentativas: [], conquistas: [], meta: null, maiorSequencia: 0, perfil: {}, compras: [], visual: {}, ...reg });
 const chaveDe = a => chaveConta(a.turma, a.nome);
+// Conta nova (ou que acabou de escolher a turma) espera a professora confirmar a turma no painel.
+// Até lá ela joga normalmente, mas não aparece no ranking de ninguém.
+const aguardandoAprovacao = a => Banco.ativo && !!a && a.aprovado === false;
+// Conta que veio do banco (o id é do banco). Conta criada sem internet tem id do aparelho.
+const contaDoBanco = a => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(a?.id || '');
 
 const Sync = {
   timer: null,
@@ -87,6 +96,8 @@ const Sync = {
     } catch (e) {
       if (e.codigo === 'SENHA_INCORRETA') {
         this.avisarUmaVez('conflito', '⚠️ Seu progresso não foi enviado: já existe outra conta com este nome e turma no banco. Fale com a professora.');
+      } else if (e.codigo === 'CONTA_APAGADA') {
+        this.avisarUmaVez('apagada', '⚠️ Esta conta foi apagada pela professora e não aparece mais no ranking. Se ela é sua mesmo, fale com a professora.');
       } else {
         if (e.codigo === 'SEM_CONEXAO') this.avisarUmaVez('offline', '📴 Sem internet. Seu progresso fica guardado neste aparelho e vai para o banco quando a conexão voltar.');
         clearTimeout(this.timer);
@@ -105,18 +116,32 @@ async function enviarAluno(a) {
     try { return await Banco.rpc('salvar_aluno', { p_token: Sync.token, p_dados: semSenha(a) }); }
     catch (e) { if (e.codigo !== 'SESSAO_INVALIDA') throw e; Sync.token = null; }
   }
-  if (!a.pin) throw new ErroBanco('SESSAO_INVALIDA');
-  const res = await Banco.rpc('entrar', { p_turma: a.turma, p_nome: a.nome, p_pin: a.pin, p_dados: semSenha(a) });
+  const res = await entrarDeNovo(a);
   Sync.token = res.token;
   return res;
 }
 
 async function garantirToken() {
   if (Sync.token) return Sync.token;
-  const res = await Banco.rpc('entrar', { p_turma: aluno.turma, p_nome: aluno.nome, p_pin: aluno.pin, p_dados: semSenha(aluno) });
+  const res = await entrarDeNovo(aluno);
   Sync.token = res.token;
   aplicarServidor(res.aluno);
   return res.token;
+}
+
+// Entra de novo com a senha guardada no aparelho. Conta criada sem internet é criada no banco agora.
+// Conta que já estava no banco só entra: se a professora apagou, ela não é criada de novo sozinha.
+async function entrarDeNovo(a) {
+  if (!a.pin) throw new ErroBanco('SESSAO_INVALIDA');
+  const args = { p_turma: a.turma, p_nome: a.nome, p_pin: a.pin, p_dados: semSenha(a) };
+  if (!contaDoBanco(a)) return Banco.rpc('entrar', args);
+  try {
+    return await Banco.rpc('entrar_conta', args);
+  } catch (e) {
+    if (e.codigo === 'CONTA_NAO_ENCONTRADA') throw new ErroBanco('CONTA_APAGADA');
+    if (e.codigo === 'SERVIDOR' && /404|PGRST202/.test(e.detalhe)) return Banco.rpc('entrar', args);
+    throw e;
+  }
 }
 
 // Troca os dados do estudante pelos do banco (já juntados), mantendo o mesmo objeto.
@@ -166,6 +191,7 @@ async function definirTurma(turma) {
     const token = await garantirToken();
     const res = await Banco.rpc('escolher_turma', { p_token: token, p_turma: turma });
     aluno.turma = res.aluno.turma;
+    if (typeof res.aluno.aprovado === 'boolean') aluno.aprovado = res.aluno.aprovado;
   } else {
     if (Object.values(dados.alunos).some(o => o.id !== aluno.id && chaveConta(o.turma, o.nome) === chaveConta(turma, aluno.nome))) throw new ErroBanco('NOME_EM_USO');
     aluno.turma = turma;
@@ -197,6 +223,8 @@ async function atualizarRanking() {
     rankingServidor = r.alunos;
     // A professora pode ter trocado a minha turma pelo painel.
     const eu = aluno && r.alunos.find(a => a.id === aluno.id);
+    // Estou no ranking: a professora já aprovou a minha turma.
+    if (eu && aluno.aprovado === false) { aluno.aprovado = true; Store.salvar(dados); }
     if (eu && turmaOficial(eu.turma) && turmaOficial(eu.turma) !== turmaOficial(aluno.turma)) {
       aluno.turma = turmaOficial(eu.turma);
       Store.salvar(dados);
@@ -212,20 +240,34 @@ async function atualizarRanking() {
 }
 
 // Lista usada pelo ranking: do banco (com o meu registro atualizado) ou, sem banco, do aparelho.
+// Quem ainda espera a professora aprovar a turma não entra (nem no próprio aparelho).
 function alunosRanking() {
-  if (!Banco.ativo || !Array.isArray(rankingServidor)) return Object.values(dados.alunos);
+  if (!Banco.ativo || !Array.isArray(rankingServidor)) return Object.values(dados.alunos).filter(a => !aguardandoAprovacao(a));
   const lista = rankingServidor.filter(a => !aluno || a.id !== aluno.id);
-  if (aluno) lista.push(aluno);
+  if (aluno && !aguardandoAprovacao(aluno)) lista.push(aluno);
   return lista;
 }
 
-/* ---------------- PAINEL PEDAGÓGICO ---------------- */
-let pinProfessor = null;
+/* ---------------- PAINEL PEDAGÓGICO ----------------
+   Cada professora entra com o próprio e-mail e senha. A sessão fica só na memória desta aba:
+   ao sair do painel ou recarregar a página, é preciso entrar de novo. */
+let sessaoProfessor = null, emailProfessor = '';
 
-async function carregarPainelOnline(pin) {
-  const res = await Banco.rpc('painel_dados', { p_pin: pin });
-  pinProfessor = pin;
+async function entrarProfessor(email, senha) {
+  const res = await Banco.rpc('professor_entrar', { p_email: email, p_senha: senha });
+  sessaoProfessor = res.token;
+  emailProfessor = res.email;
+}
+
+async function carregarPainelOnline() {
+  const res = await Banco.rpc('painel_dados', { p_sessao: sessaoProfessor });
   return { alunos: Object.fromEntries(Object.entries(res.alunos).map(([id, a]) => [id, comPadroes(a)])) };
+}
+
+function sairProfessor() {
+  if (Banco.ativo && sessaoProfessor) Banco.rpc('professor_sair', { p_sessao: sessaoProfessor }).catch(() => {});
+  sessaoProfessor = null;
+  emailProfessor = '';
 }
 
 window.addEventListener('online', () => Sync.enviar());

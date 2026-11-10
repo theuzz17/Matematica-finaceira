@@ -678,6 +678,29 @@ body.com-nav .toasts { bottom: calc(84px + env(safe-area-inset-bottom)); }
 .mudar-turma .campo { flex: 1; margin: 0; min-width: 0; }
 .mudar-turma .btn { flex: none; min-height: 50px; }
 
+/* ---------- APROVAÇÃO DA TURMA ---------- */
+/* Aviso para o estudante que ainda espera a professora confirmar a turma. */
+.rk-espera { display: flex; gap: 10px; align-items: flex-start; text-align: left; background: #fef3c7; color: #78350f; border: 1.5px solid #fcd34d; border-radius: 16px; padding: 12px 14px; margin: 0 0 14px; font-size: .9rem; }
+.rk-espera > span { font-size: 1.5rem; line-height: 1.2; }
+.rk-espera p { margin: 0; }
+.rk-espera b { display: block; margin-bottom: 2px; }
+/* Painel: contas aguardando a professora aprovar. */
+.painel-pendentes { border: 2px solid #f59e0b; background: #fffbeb; }
+.pend-qtd { display: inline-block; background: #f59e0b; color: #fff; border-radius: 99px; padding: 0 9px; font-size: .9rem; vertical-align: middle; }
+.pend-linha { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 0; border-top: 1px solid #fde68a; }
+.pend-info { flex: 1 1 220px; min-width: 0; }
+.pend-nome { background: none; border: 0; padding: 0; font: inherit; font-weight: 800; color: var(--texto); text-align: left; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.pend-info small { display: block; color: var(--texto-3); font-size: .82rem; margin-top: 2px; }
+.pend-info .pend-alerta { color: #b45309; font-weight: 700; }
+.pend-botoes { display: flex; flex-wrap: wrap; gap: 6px; }
+.pend-botoes .btn { padding: 8px 12px; min-height: 42px; font-size: .9rem; }
+@media (max-width: 560px) {
+  .pend-botoes { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; width: 100%; }
+  .pend-botoes .btn { padding: 8px 4px; gap: 4px; font-size: .84rem; line-height: 1.15; text-align: center; }
+}
+.pend-todos { margin-top: 10px; width: 100%; }
+.hist-espera { margin: 8px 0; }
+
 /* =========================================================
    MUNDOS, BIFURCAÇÕES, MOEDAS E LOJINHA
    ========================================================= */

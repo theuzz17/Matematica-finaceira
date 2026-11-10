@@ -13,6 +13,7 @@ create table if not exists public.alunos (
   turma_norm    text not null,
   pin_hash      text not null,
   dados         jsonb not null default '{}'::jsonb,  -- fases, tentativas, conquistas, meta, perfil...
+  aprovado      boolean not null default false,     -- a professora confirmou a turma (só assim aparece no ranking)
   falhas        int not null default 0,
   bloqueado_ate timestamptz,
   criado_em     timestamptz not null default now(),
@@ -28,21 +29,57 @@ create table if not exists public.sessoes (
 );
 create index if not exists sessoes_aluno_idx on public.sessoes (aluno_id);
 
+-- Antigo PIN único do painel. Não é mais usado: o painel agora tem contas de professora (abaixo).
 create table if not exists public.config (
   id                 int primary key default 1 check (id = 1),
   pin_professor_hash text not null,
   falhas             int not null default 0,
   bloqueado_ate      timestamptz
 );
--- PIN inicial do painel pedagógico: 1234 (troque pelo painel depois de entrar).
-insert into public.config (id, pin_professor_hash)
-values (1, extensions.crypt('1234', extensions.gen_salt('bf', 8)))
-on conflict (id) do nothing;
+
+-- CONTAS DE PROFESSORA: entram no painel com e-mail e senha (botão "Entrar" do painel).
+-- Este arquivo é público: NUNCA escreva uma senha aqui. Para criar uma conta (ou trocar a senha
+-- de uma conta), rode só no SQL Editor do Supabase, trocando o e-mail e a SENHA:
+--   insert into public.professores (email, senha_hash)
+--   values (lower('email@exemplo.com'), extensions.crypt('SENHA', extensions.gen_salt('bf', 8)))
+--   on conflict (email) do update set senha_hash = excluded.senha_hash, falhas = 0, bloqueado_ate = null;
+-- Para tirar o acesso de alguém:  delete from public.professores where email = 'email@exemplo.com';
+create table if not exists public.professores (
+  id            uuid primary key default gen_random_uuid(),
+  email         text not null unique check (email = lower(trim(email)) and position('@' in email) > 1),
+  senha_hash    text not null,
+  falhas        int not null default 0,
+  bloqueado_ate timestamptz,
+  criado_em     timestamptz not null default now()
+);
+
+create table if not exists public.sessoes_professor (
+  token        uuid primary key default gen_random_uuid(),
+  professor_id uuid not null references public.professores(id) on delete cascade,
+  criado_em    timestamptz not null default now(),
+  usado_em     timestamptz not null default now()
+);
+
+-- APROVAÇÃO DA TURMA: conta nova só aparece no ranking depois que a professora confirma, no painel,
+-- que o estudante é mesmo daquela turma. Até lá ele joga e o progresso fica salvo normalmente.
+-- Na primeira vez que este arquivo roda, as contas antigas continuam valendo, e as criadas a partir
+-- de 9/11/2026 (o dia em que estudantes criaram contas na turma dos outros) ficam aguardando revisão.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'alunos' and column_name = 'aprovado') then
+    alter table public.alunos add column aprovado boolean not null default true;
+    update public.alunos set aprovado = false where criado_em >= timestamptz '2026-11-09 00:00:00-03';
+  end if;
+end $$;
+alter table public.alunos alter column aprovado set default false;
 
 alter table public.alunos  enable row level security;
 alter table public.sessoes enable row level security;
 alter table public.config  enable row level security;
-revoke all on public.alunos, public.sessoes, public.config from anon, authenticated;
+alter table public.professores       enable row level security;
+alter table public.sessoes_professor enable row level security;
+revoke all on public.alunos, public.sessoes, public.config, public.professores, public.sessoes_professor from anon, authenticated;
 
 -- ---------------------------------------------------------
 -- FUNÇÕES INTERNAS (não ficam disponíveis para o site)
@@ -97,8 +134,8 @@ declare
   a     jsonb;
   b     jsonb;
 begin
-  antigo := coalesce(antigo, '{}'::jsonb) - 'pin' - 'id' - 'nome' - 'turma';
-  novo   := coalesce(novo,   '{}'::jsonb) - 'pin' - 'id' - 'nome' - 'turma';
+  antigo := coalesce(antigo, '{}'::jsonb) - 'pin' - 'id' - 'nome' - 'turma' - 'aprovado';
+  novo   := coalesce(novo,   '{}'::jsonb) - 'pin' - 'id' - 'nome' - 'turma' - 'aprovado';
 
   select coalesce(jsonb_agg(y.t order by y.t->>'data'), '[]'::jsonb) into tent
   from (
@@ -174,7 +211,7 @@ end $$;
 create or replace function public.registro_aluno(r public.alunos) returns jsonb
 language sql stable as $$
   select (r.dados - 'pin') || jsonb_build_object(
-    'id', r.id, 'nome', r.nome, 'turma', r.turma,
+    'id', r.id, 'nome', r.nome, 'turma', r.turma, 'aprovado', r.aprovado,
     'criadoEm', coalesce(r.dados->>'criadoEm', to_json(r.criado_em) #>> '{}'))
 $$;
 
@@ -192,23 +229,27 @@ begin
   return r;
 end $$;
 
--- Confere o PIN da professora com trava contra tentativas repetidas.
-create or replace function public.conferir_pin_professor(p_pin text) returns text
-language plpgsql set search_path = public, extensions as $$
-declare c public.config;
+-- O painel deixou de usar o PIN único (o 1234 estava neste arquivo público).
+drop function if exists public.conferir_pin_professor(text);
+
+-- Professora dona da sessão do painel (token devolvido por professor_entrar), ou nulo.
+-- A sessão vale enquanto for usada; depois de 12 horas parada, é preciso entrar de novo.
+create or replace function public.professor_da_sessao(p_sessao text) returns uuid
+language plpgsql set search_path = public as $$
+declare pid uuid;
 begin
-  select * into c from public.config where id = 1 for update;
-  if c.bloqueado_ate is not null and c.bloqueado_ate > now() then return 'BLOQUEADO'; end if;
-  if c.pin_professor_hash <> extensions.crypt(coalesce(p_pin, ''), c.pin_professor_hash) then
-    update public.config set
-      falhas = case when falhas + 1 >= 8 then 0 else falhas + 1 end,
-      bloqueado_ate = case when falhas + 1 >= 8 then now() + interval '15 minutes' else null end
-    where id = 1;
-    return 'PIN_INCORRETO';
-  end if;
-  update public.config set falhas = 0, bloqueado_ate = null where id = 1;
-  return 'OK';
+  if coalesce(p_sessao, '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then return null; end if;
+  update public.sessoes_professor set usado_em = now()
+  where token = p_sessao::uuid and usado_em > now() - interval '12 hours'
+  returning professor_id into pid;
+  return pid;
 end $$;
+
+-- Usada por todas as funções do painel: 'OK' ou o erro para o site mostrar.
+create or replace function public.conferir_professor(p_sessao text) returns text
+language sql set search_path = public as $$
+  select case when public.professor_da_sessao(p_sessao) is null then 'SESSAO_PROFESSOR_INVALIDA' else 'OK' end
+$$;
 
 -- ---------------------------------------------------------
 -- FUNÇÕES DO ESTUDANTE (chamadas pelo site)
@@ -220,7 +261,7 @@ end $$;
 --   'criar'  = só cria conta nova (erro CONTA_EXISTE)
 --   'ambos'  = entra ou cria (usado para enviar progresso feito sem internet)
 -- Se o aparelho já tinha progresso guardado (p_dados), ele é juntado ao do banco.
--- Conta nova só pode ser criada em uma das turmas oficiais.
+-- Conta nova só pode ser criada em uma das turmas oficiais, e só entra no ranking depois que a professora aprova.
 create or replace function public.acessar_conta(p_turma text, p_nome text, p_pin text, p_dados jsonb, p_modo text) returns jsonb
 language plpgsql set search_path = public, extensions as $$
 declare
@@ -249,7 +290,8 @@ begin
   achou := found;
 
   -- Conta antiga com uma turma que não dá para reconhecer ("8º ano", "8"): se só existe uma
-  -- com esse nome, é ela. Ao entrar com a senha certa, ela passa para a turma escolhida agora.
+  -- com esse nome, é ela. Ao entrar com a senha certa, ela passa para a turma escolhida agora
+  -- e fica aguardando a professora confirmar essa turma.
   if not achou and ofi and (
     select count(*) from public.alunos a where a.nome_norm = public.normalizar(nm) and public.turma_oficial(a.turma) is null
   ) = 1 then
@@ -280,15 +322,17 @@ begin
       falhas = 0, bloqueado_ate = null,
       turma      = case when ofi then tm else turma end,
       turma_norm = case when ofi then public.normalizar_turma(tm) else turma_norm end,
+      -- Turma escolhida pelo próprio estudante: a professora precisa confirmar.
+      aprovado   = case when ofi and public.turma_oficial(r.turma) is distinct from tm then false else aprovado end,
       dados = case when p_dados is null then dados else public.mesclar_dados(dados, p_dados) end,
       atualizado_em = now()
     where id = r.id
     returning * into r;
   else
-    insert into public.alunos (nome, turma, nome_norm, turma_norm, pin_hash, dados)
+    insert into public.alunos (nome, turma, nome_norm, turma_norm, pin_hash, dados, aprovado)
     values (nm, tm, public.normalizar(nm), public.normalizar_turma(tm),
             extensions.crypt(p_pin, extensions.gen_salt('bf', 8)),
-            public.mesclar_dados('{}'::jsonb, coalesce(p_dados, '{}'::jsonb)))
+            public.mesclar_dados('{}'::jsonb, coalesce(p_dados, '{}'::jsonb)), false)
     returning * into r;
   end if;
 
@@ -365,7 +409,7 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
--- Conta antiga sem turma reconhecida: o estudante escolhe a turma uma vez.
+-- Conta antiga sem turma reconhecida: o estudante escolhe a turma uma vez, e a professora confirma no painel.
 -- Quem já está em uma turma não troca sozinho (só a professora troca); recebe de volta a turma que já tem.
 create or replace function public.escolher_turma(p_token uuid, p_turma text) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
@@ -378,7 +422,7 @@ begin
   if tm is null then return jsonb_build_object('erro', 'TURMA_INVALIDA'); end if;
   if public.turma_oficial(r.turma) is null then
     begin
-      update public.alunos set turma = tm, turma_norm = public.normalizar_turma(tm), atualizado_em = now()
+      update public.alunos set turma = tm, turma_norm = public.normalizar_turma(tm), aprovado = false, atualizado_em = now()
       where id = r.id
       returning * into r;
     exception when unique_violation then
@@ -396,6 +440,7 @@ $$;
 
 -- Ranking: só quem está logado vê, e só os dados públicos
 -- (primeiro nome + inicial do sobrenome, apelido, turma, foto e XP).
+-- Só aparece quem a professora já aprovou na turma.
 create or replace function public.ranking_publico(p_token uuid) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
 declare r public.alunos;
@@ -420,34 +465,85 @@ begin
         select jsonb_agg(jsonb_build_object('faseId', t->>'faseId', 'data', t->>'data', 'pontos', t->'pontos'))
         from jsonb_array_elements(case when jsonb_typeof(a.dados->'tentativas') = 'array' then a.dados->'tentativas' else '[]'::jsonb end) t
       ), '[]'::jsonb)))
-    from public.alunos a), '[]'::jsonb));
+    from public.alunos a where a.aprovado), '[]'::jsonb));
 end $$;
 
 -- ---------------------------------------------------------
--- FUNÇÕES DO PAINEL PEDAGÓGICO (exigem o PIN da professora)
+-- FUNÇÕES DO PAINEL PEDAGÓGICO (exigem uma professora logada: p_sessao)
 -- ---------------------------------------------------------
-create or replace function public.painel_dados(p_pin text) returns jsonb
+-- Versões antigas, que pediam o PIN (p_pin), saem para dar lugar às que pedem a sessão (p_sessao).
+drop function if exists public.painel_dados(text);
+drop function if exists public.professor_alterar_pin(text, text);
+drop function if exists public.professor_apagar_tudo(text);
+drop function if exists public.professor_importar(text, jsonb);
+drop function if exists public.professor_redefinir_senha(text, uuid, text);
+drop function if exists public.professor_apagar_aluno(text, uuid);
+drop function if exists public.professor_mudar_turma(text, uuid, text);
+drop function if exists public.professor_aprovar(text, jsonb);
+
+-- Botão "Entrar" do painel: e-mail e senha da professora. Errar 8 vezes trava a conta por 15 minutos.
+create or replace function public.professor_entrar(p_email text, p_senha text) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
-declare st text := public.conferir_pin_professor(p_pin);
+declare
+  p   public.professores;
+  tok uuid;
+begin
+  select * into p from public.professores where email = lower(trim(coalesce(p_email, ''))) for update;
+  if not found then return jsonb_build_object('erro', 'LOGIN_INCORRETO'); end if;
+  if p.bloqueado_ate is not null and p.bloqueado_ate > now() then return jsonb_build_object('erro', 'BLOQUEADO'); end if;
+  if p.senha_hash <> extensions.crypt(coalesce(p_senha, ''), p.senha_hash) then
+    update public.professores set
+      falhas = case when falhas + 1 >= 8 then 0 else falhas + 1 end,
+      bloqueado_ate = case when falhas + 1 >= 8 then now() + interval '15 minutes' else null end
+    where id = p.id;
+    return jsonb_build_object('erro', 'LOGIN_INCORRETO');
+  end if;
+  update public.professores set falhas = 0, bloqueado_ate = null where id = p.id;
+  delete from public.sessoes_professor where usado_em < now() - interval '12 hours';
+  insert into public.sessoes_professor (professor_id) values (p.id) returning token into tok;
+  return jsonb_build_object('token', tok, 'email', p.email);
+end $$;
+
+create or replace function public.professor_sair(p_sessao text) returns jsonb
+language sql security definer set search_path = public as $$
+  delete from public.sessoes_professor where token::text = lower(coalesce(p_sessao, ''));
+  select jsonb_build_object('ok', true);
+$$;
+
+-- A professora troca a própria senha (pelo menos 6 caracteres).
+create or replace function public.professor_trocar_senha(p_sessao text, p_atual text, p_nova text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  pid uuid := public.professor_da_sessao(p_sessao);
+  p   public.professores;
+begin
+  if pid is null then return jsonb_build_object('erro', 'SESSAO_PROFESSOR_INVALIDA'); end if;
+  select * into p from public.professores where id = pid for update;
+  if p.bloqueado_ate is not null and p.bloqueado_ate > now() then return jsonb_build_object('erro', 'BLOQUEADO'); end if;
+  if p.senha_hash <> extensions.crypt(coalesce(p_atual, ''), p.senha_hash) then
+    update public.professores set
+      falhas = case when falhas + 1 >= 8 then 0 else falhas + 1 end,
+      bloqueado_ate = case when falhas + 1 >= 8 then now() + interval '15 minutes' else null end
+    where id = pid;
+    return jsonb_build_object('erro', 'SENHA_ATUAL_INCORRETA');
+  end if;
+  if char_length(coalesce(p_nova, '')) not between 6 and 72 then return jsonb_build_object('erro', 'SENHA_CURTA'); end if;
+  update public.professores set senha_hash = extensions.crypt(p_nova, extensions.gen_salt('bf', 8)), falhas = 0 where id = pid;
+  return jsonb_build_object('ok', true);
+end $$;
+
+create or replace function public.painel_dados(p_sessao text) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare st text := public.conferir_professor(p_sessao);
 begin
   if st <> 'OK' then return jsonb_build_object('erro', st); end if;
   return jsonb_build_object('alunos', coalesce((
     select jsonb_object_agg(a.id::text, public.registro_aluno(a)) from public.alunos a), '{}'::jsonb));
 end $$;
 
-create or replace function public.professor_alterar_pin(p_pin text, p_novo text) returns jsonb
+create or replace function public.professor_apagar_tudo(p_sessao text) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
-declare st text := public.conferir_pin_professor(p_pin);
-begin
-  if st <> 'OK' then return jsonb_build_object('erro', st); end if;
-  if coalesce(p_novo, '') !~ '^\d{4,8}$' then return jsonb_build_object('erro', 'DADOS_INVALIDOS'); end if;
-  update public.config set pin_professor_hash = extensions.crypt(p_novo, extensions.gen_salt('bf', 8)) where id = 1;
-  return jsonb_build_object('ok', true);
-end $$;
-
-create or replace function public.professor_apagar_tudo(p_pin text) returns jsonb
-language plpgsql security definer set search_path = public, extensions as $$
-declare st text := public.conferir_pin_professor(p_pin);
+declare st text := public.conferir_professor(p_sessao);
 begin
   if st <> 'OK' then return jsonb_build_object('erro', st); end if;
   delete from public.alunos where true;
@@ -455,10 +551,10 @@ begin
 end $$;
 
 -- Importa um backup (o mesmo arquivo JSON do botão "Backup dos dados").
-create or replace function public.professor_importar(p_pin text, p_alunos jsonb) returns jsonb
+create or replace function public.professor_importar(p_sessao text, p_alunos jsonb) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
 declare
-  st  text := public.conferir_pin_professor(p_pin);
+  st  text := public.conferir_professor(p_sessao);
   reg jsonb;
   nm  text;
   tm  text;
@@ -480,9 +576,10 @@ begin
       mesclados := mesclados + 1;
     else
       pin := case when coalesce(reg->>'pin', '') ~ '^\d{4}$' then reg->>'pin' else '0000' end;
-      insert into public.alunos (nome, turma, nome_norm, turma_norm, pin_hash, dados)
+      -- Backup trazido pela professora: já vale como aprovado.
+      insert into public.alunos (nome, turma, nome_norm, turma_norm, pin_hash, dados, aprovado)
       values (nm, tm, public.normalizar(nm), public.normalizar_turma(tm),
-              extensions.crypt(pin, extensions.gen_salt('bf', 8)), public.mesclar_dados('{}'::jsonb, reg));
+              extensions.crypt(pin, extensions.gen_salt('bf', 8)), public.mesclar_dados('{}'::jsonb, reg), true);
       adicionados := adicionados + 1;
     end if;
   end loop;
@@ -490,9 +587,9 @@ begin
 end $$;
 
 -- Estudante esqueceu a senha: a professora define uma nova pelo painel.
-create or replace function public.professor_redefinir_senha(p_pin text, p_aluno uuid, p_nova text) returns jsonb
+create or replace function public.professor_redefinir_senha(p_sessao text, p_aluno uuid, p_nova text) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
-declare st text := public.conferir_pin_professor(p_pin);
+declare st text := public.conferir_professor(p_sessao);
 begin
   if st <> 'OK' then return jsonb_build_object('erro', st); end if;
   if coalesce(p_nova, '') !~ '^\d{4}$' then return jsonb_build_object('erro', 'DADOS_INVALIDOS'); end if;
@@ -503,9 +600,9 @@ begin
 end $$;
 
 -- Apaga a conta de um estudante (por exemplo, uma conta de teste ou repetida).
-create or replace function public.professor_apagar_aluno(p_pin text, p_aluno uuid) returns jsonb
+create or replace function public.professor_apagar_aluno(p_sessao text, p_aluno uuid) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
-declare st text := public.conferir_pin_professor(p_pin);
+declare st text := public.conferir_professor(p_sessao);
 begin
   if st <> 'OK' then return jsonb_build_object('erro', st); end if;
   delete from public.alunos where id = p_aluno;
@@ -514,22 +611,44 @@ begin
 end $$;
 
 -- Passa um estudante para outra turma (por exemplo, quem escolheu a turma errada). O progresso não muda.
-create or replace function public.professor_mudar_turma(p_pin text, p_aluno uuid, p_turma text) returns jsonb
+-- Como é a professora que escolhe a turma, a conta já fica aprovada nela.
+create or replace function public.professor_mudar_turma(p_sessao text, p_aluno uuid, p_turma text) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
 declare
-  st text := public.conferir_pin_professor(p_pin);
+  st text := public.conferir_professor(p_sessao);
   tm text := public.turma_oficial(p_turma);
 begin
   if st <> 'OK' then return jsonb_build_object('erro', st); end if;
   if tm is null then return jsonb_build_object('erro', 'TURMA_INVALIDA'); end if;
   begin
-    update public.alunos set turma = tm, turma_norm = public.normalizar_turma(tm), atualizado_em = now()
+    update public.alunos set turma = tm, turma_norm = public.normalizar_turma(tm), aprovado = true, atualizado_em = now()
     where id = p_aluno;
     if not found then return jsonb_build_object('erro', 'CONTA_NAO_ENCONTRADA'); end if;
   exception when unique_violation then
     return jsonb_build_object('erro', 'NOME_EM_USO');
   end;
   return jsonb_build_object('ok', true);
+end $$;
+
+-- Aprova contas na turma em que estão (uma ou várias de uma vez). p_alunos = lista JSON de ids.
+-- Conta sem turma oficial não é aprovada assim: use "Mudar turma", que já aprova.
+create or replace function public.professor_aprovar(p_sessao text, p_alunos jsonb) returns jsonb
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  st text := public.conferir_professor(p_sessao);
+  n  int;
+begin
+  if st <> 'OK' then return jsonb_build_object('erro', st); end if;
+  if jsonb_typeof(p_alunos) <> 'array' or jsonb_array_length(p_alunos) > 500
+     or exists (select 1 from jsonb_array_elements(p_alunos) e where jsonb_typeof(e) <> 'string'
+                or e #>> '{}' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') then
+    return jsonb_build_object('erro', 'DADOS_INVALIDOS');
+  end if;
+  update public.alunos set aprovado = true, atualizado_em = now()
+  where id in (select (e #>> '{}')::uuid from jsonb_array_elements(p_alunos) e)
+    and not aprovado and public.turma_oficial(turma) is not null;
+  get diagnostics n = row_count;
+  return jsonb_build_object('aprovados', n);
 end $$;
 
 -- Atualiza contas antigas para a nova regra de turma ("8A" = "8º A").
@@ -569,23 +688,26 @@ end $$;
 revoke execute on function
   public.normalizar(text), public.normalizar_turma(text), public.limpar(text), public.mesclar_dados(jsonb, jsonb),
   public.turmas_oficiais(), public.turma_oficial(text),
-  public.registro_aluno(public.alunos), public.aluno_da_sessao(uuid), public.conferir_pin_professor(text),
+  public.registro_aluno(public.alunos), public.aluno_da_sessao(uuid),
+  public.professor_da_sessao(text), public.conferir_professor(text),
   public.acessar_conta(text, text, text, jsonb, text),
   public.entrar(text, text, text, jsonb), public.entrar_conta(text, text, text, jsonb), public.criar_conta(text, text, text, jsonb),
   public.salvar_aluno(uuid, jsonb), public.trocar_senha(uuid, text, text), public.escolher_turma(uuid, text),
   public.sair(uuid), public.ranking_publico(uuid), public.painel_dados(text),
-  public.professor_alterar_pin(text, text), public.professor_apagar_tudo(text), public.professor_importar(text, jsonb),
+  public.professor_entrar(text, text), public.professor_sair(text), public.professor_trocar_senha(text, text, text),
+  public.professor_apagar_tudo(text), public.professor_importar(text, jsonb),
   public.professor_redefinir_senha(text, uuid, text), public.professor_apagar_aluno(text, uuid),
-  public.professor_mudar_turma(text, uuid, text)
+  public.professor_mudar_turma(text, uuid, text), public.professor_aprovar(text, jsonb)
 from public, anon, authenticated;
 
 grant execute on function
   public.entrar(text, text, text, jsonb), public.entrar_conta(text, text, text, jsonb), public.criar_conta(text, text, text, jsonb),
   public.salvar_aluno(uuid, jsonb), public.trocar_senha(uuid, text, text), public.escolher_turma(uuid, text),
   public.sair(uuid), public.ranking_publico(uuid), public.painel_dados(text),
-  public.professor_alterar_pin(text, text), public.professor_apagar_tudo(text), public.professor_importar(text, jsonb),
+  public.professor_entrar(text, text), public.professor_sair(text), public.professor_trocar_senha(text, text, text),
+  public.professor_apagar_tudo(text), public.professor_importar(text, jsonb),
   public.professor_redefinir_senha(text, uuid, text), public.professor_apagar_aluno(text, uuid),
-  public.professor_mudar_turma(text, uuid, text)
+  public.professor_mudar_turma(text, uuid, text), public.professor_aprovar(text, jsonb)
 to anon, authenticated;
 
 -- Remove a função de dar XP pelo painel, caso tenha sido criada antes.

@@ -141,7 +141,8 @@ function trocarModoLogin(modo) {
   $('#campo-pin2').hidden = modo !== 'criar';
   $('#login-pin2').required = modo === 'criar';
   $('#btn-login').textContent = TEXTOS_LOGIN[modo].botao;
-  $('#login-dica').textContent = TEXTOS_LOGIN[modo].dica;
+  $('#login-dica').textContent = TEXTOS_LOGIN[modo].dica
+    + (modo === 'criar' && Banco.ativo ? ' Seu nome só aparece no ranking depois que a professora confirmar a sua turma.' : '');
   $('#login-erro').textContent = '';
 }
 
@@ -183,6 +184,7 @@ function iniciarLogin() {
       $('#login-pin').value = ''; $('#login-pin2').value = ''; $('#login-erro').textContent = '';
       personagemDe(aluno.personagem) ? abrirTrilha() : abrirPersonagens();
       if (modo === 'criar') toast('🎉 Conta criada! Guarde seu nome, turma e senha para entrar de novo.');
+      if (aguardandoAprovacao(aluno)) toast('⏳ Você já pode jogar! Seu nome entra no ranking quando a professora confirmar a sua turma.');
     };
 
     // Com banco de dados: entra ou cria pelo banco. Sem internet, usa o aparelho.
@@ -305,7 +307,7 @@ function abrirEscolhaTurma() {
     <h2>Qual é a sua turma?</h2>
     <p>Agora o jogo tem as turmas ${esc(listaTurmas())}, e cada uma tem o seu ranking. Escolha a sua para aparecer junto com os colegas.</p>
     <div class="segmentado seg-turma" id="et-turmas" role="radiogroup" aria-label="Sua turma">${radiosTurma('et-turma')}</div>
-    <p class="dica">Depois de escolher, só a professora pode trocar.</p>
+    <p class="dica">Depois de escolher, só a professora pode trocar.${Banco.ativo ? ' Ela confirma a sua turma e aí o seu nome aparece no ranking.' : ''}</p>
     <p class="erro" id="et-erro"></p>
     <button class="btn btn-primario btn-grande" id="et-salvar" disabled>Escolha a turma</button>
     <button class="btn btn-texto" onclick="fecharModal()">Agora não</button></div>`);
@@ -325,7 +327,8 @@ function abrirEscolhaTurma() {
     }
     fecharModal();
     const agora = nomeTurma(aluno.turma);
-    toast(agora === t ? `👥 Pronto! Você está no ${esc(t)}.` : `👥 Você já está no ${esc(agora)}. Para trocar, fale com a professora.`);
+    toast(agora !== t ? `👥 Você já está no ${esc(agora)}. Para trocar, fale com a professora.`
+      : aguardandoAprovacao(aluno) ? `👥 Pronto! Agora a professora confirma que você é do ${esc(t)}.` : `👥 Pronto! Você está no ${esc(t)}.`);
     if ($('#tela-ranking').classList.contains('ativa')) renderRanking();
   };
 }
@@ -876,28 +879,35 @@ function abrirConquistas() {
 }
 
 /* ---------------- PAINEL DA PROFESSORA ---------------- */
+// Com banco: cada professora entra com o próprio e-mail e senha. Sem banco: PIN guardado no aparelho.
 function abrirLoginProfessor() {
   abrirModal(`
     <h2>👩‍🏫 Painel pedagógico</h2>
     <p>Acesso restrito à pesquisadora e à professora regente.</p>
     <form id="form-prof">
-      <label class="campo">PIN de acesso<input type="password" id="prof-pin" inputmode="numeric" maxlength="8" autocomplete="off" required></label>
+      ${Banco.ativo
+        ? `<label class="campo">E-mail<input type="email" id="prof-email" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="120" required></label>
+           <label class="campo">Senha<input type="password" id="prof-senha" autocomplete="current-password" maxlength="72" required></label>`
+        : '<label class="campo">PIN de acesso<input type="password" id="prof-pin" inputmode="numeric" maxlength="8" autocomplete="off" required></label>'}
       <p class="erro" id="prof-erro"></p>
       <button class="btn btn-primario btn-grande">Entrar</button>
     </form>
     <button class="btn btn-texto" onclick="fecharModal()">Cancelar</button>`);
-  $('#prof-pin').focus();
+  $(Banco.ativo ? '#prof-email' : '#prof-pin').focus();
   $('#form-prof').onsubmit = async e => {
     e.preventDefault();
-    const pin = $('#prof-pin').value;
     if (Banco.ativo) {
       const botao = $('#form-prof .btn-primario');
-      botao.disabled = true; botao.textContent = 'Carregando...';
-      try { painelDados = await carregarPainelOnline(pin); fecharModal(); abrirPainel(); }
-      catch (falha) { $('#prof-erro').textContent = mensagemErro(falha); }
+      botao.disabled = true; botao.textContent = 'Entrando...';
+      try {
+        await entrarProfessor($('#prof-email').value.trim(), $('#prof-senha').value);
+        painelDados = await carregarPainelOnline();
+        fecharModal(); abrirPainel();
+      } catch (falha) { $('#prof-erro').textContent = mensagemErro(falha); }
       finally { botao.disabled = false; botao.textContent = 'Entrar'; }
       return;
     }
+    const pin = $('#prof-pin').value;
     if (pin === dados.config.pin) { fecharModal(); abrirPainel(); }
     else $('#prof-erro').textContent = 'PIN incorreto.';
   };
@@ -920,8 +930,9 @@ let painelDados = null;
 function abrirPainel() {
   if (!Banco.ativo) { dados = Store.ler(); painelDados = dados; }
   $('#painel-aviso').textContent = Banco.ativo
-    ? '☁️ Dados do banco de dados online: aparecem os estudantes de todos os aparelhos.'
+    ? `☁️ Dados do banco de dados online: aparecem os estudantes de todos os aparelhos. Você entrou como ${emailProfessor}.`
     : 'Os dados ficam salvos apenas neste navegador. Para juntar os resultados de vários aparelhos, exporte o backup em cada um e importe aqui.';
+  $('#btn-pin').textContent = Banco.ativo ? '🔐 Trocar minha senha' : '🔐 Alterar PIN';
   // Filtro: as turmas oficiais e, se houver, as contas antigas que ainda não têm turma.
   const filtro = $('#painel-turma'), antes = filtro.value;
   const semTurma = Object.values(painelDados.alunos).some(a => !turmaOficial(a.turma));
@@ -933,12 +944,106 @@ function abrirPainel() {
   mostrar('tela-professor');
 }
 
-function alunosFiltrados() {
+// Contas que ainda esperam a professora confirmar a turma ficam fora dos números, da tabela e das planilhas:
+// aparecem só no quadro "Aguardando sua aprovação".
+function daTurmaFiltrada(a) {
   const t = $('#painel-turma').value;
-  return Object.values(painelDados.alunos).filter(a => !t || (t === '?' ? !turmaOficial(a.turma) : turmaOficial(a.turma) === t));
+  return !t || (t === '?' ? !turmaOficial(a.turma) : turmaOficial(a.turma) === t);
+}
+const alunosFiltrados = () => Object.values(painelDados.alunos).filter(a => !aguardandoAprovacao(a) && daTurmaFiltrada(a));
+const pendentesFiltrados = () => Object.values(painelDados.alunos).filter(a => aguardandoAprovacao(a) && daTurmaFiltrada(a));
+const dataHora = d => { const x = new Date(d); return isNaN(x) ? '-' : x.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }); };
+
+/* ---------------- APROVAÇÃO DA TURMA ----------------
+   Conta nova só entra no ranking depois que a professora confirma que o estudante é daquela turma.
+   Assim ninguém aparece na turma dos outros. */
+function renderPendentes() {
+  const el = $('#painel-pendentes');
+  const lista = pendentesFiltrados().sort((x, y) => nomeTurma(x.turma).localeCompare(nomeTurma(y.turma)) || x.nome.localeCompare(y.nome, 'pt-BR'));
+  el.hidden = !lista.length;
+  if (!lista.length) { el.innerHTML = ''; return; }
+  const todos = Object.values(painelDados.alunos);
+  const comTurma = lista.filter(a => turmaOficial(a.turma));
+  el.innerHTML = `<h3>⏳ Aguardando sua aprovação <span class="pend-qtd">${lista.length}</span></h3>
+    <p class="legenda">Contas novas só entram no ranking depois que você confirma a turma. Até lá, o estudante joga e o progresso fica salvo, mas ele não aparece para os colegas nem nos números e planilhas do painel. Toque no botão da turma em que o estudante realmente está, ou apague a conta se ela for falsa.</p>
+    <div class="pend-lista">${lista.map(a => {
+      const t = turmaOficial(a.turma), nf = fasesConcluidas(a);
+      const outras = todos.filter(o => o.id !== a.id && normalizar(o.nome) === normalizar(a.nome) && chaveTurma(o.turma) !== chaveTurma(a.turma));
+      return `<div class="pend-linha" data-id="${esc(a.id)}">
+        <div class="pend-info">
+          <button type="button" class="pend-nome" data-acao="ver" title="Ver o histórico">${esc(a.nome)}</button>
+          ${t ? tagTurma(t) : `<span class="tag-turma">⚠️ ${esc(a.turma)}</span>`}
+          <small>Escolheu ${esc(nomeTurma(a.turma))} · conta de ${dataHora(a.criadoEm)} · ${nf} ${nf === 1 ? 'fase concluída' : 'fases concluídas'}</small>
+          ${outras.length ? `<small class="pend-alerta">⚠️ Já existe uma conta com este nome no ${outras.map(o => esc(nomeTurma(o.turma))).join(' e no ')}</small>` : ''}
+        </div>
+        <div class="pend-botoes">
+          ${TURMAS.map(x => x === t
+            ? `<button type="button" class="btn btn-primario" data-acao="aprovar">✅ É do ${esc(x)}</button>`
+            : `<button type="button" class="btn btn-secundario" data-acao="mover" data-turma="${esc(x)}">👥 É do ${esc(x)}</button>`).join('')}
+          <button type="button" class="btn btn-perigo" data-acao="apagar">🗑️ Apagar</button>
+        </div>
+      </div>`;
+    }).join('')}</div>
+    ${comTurma.length > 1 ? `<button type="button" class="btn btn-secundario pend-todos" data-acao="todos">✅ Aprovar todos na turma que escolheram (${comTurma.length})</button>` : ''}`;
+
+  el.onclick = async e => {
+    const b = e.target.closest('[data-acao]'); if (!b || b.disabled) return;
+    const acao = b.dataset.acao, a = painelDados.alunos[b.closest('[data-id]')?.dataset.id];
+    if (acao === 'ver') { abrirHistorico(a.id); return; }
+    if (acao === 'todos') {
+      if (!confirm(`Aprovar estas ${comTurma.length} contas na turma que cada uma escolheu?\n\n${comTurma.map(x => `${x.nome} (${nomeTurma(x.turma)})`).join('\n')}`)) return;
+      b.disabled = true;
+      if (await aprovarContas(comTurma)) { renderPainel(); toast(`✅ ${comTurma.length} contas aprovadas.`); }
+      else b.disabled = false;
+      return;
+    }
+    b.disabled = true;
+    let ok = false, msg = '';
+    if (acao === 'aprovar') { ok = await aprovarContas([a]); msg = `✅ ${esc(a.nome)}: turma ${esc(nomeTurma(a.turma))} confirmada.`; }
+    if (acao === 'mover') { ok = await mudarTurmaConta(a, b.dataset.turma); msg = `👥 ${esc(a.nome)} agora está no ${esc(b.dataset.turma)}.`; }
+    if (acao === 'apagar') { ok = await apagarConta(a); msg = `🗑️ Conta de ${esc(a.nome)} apagada.`; }
+    if (ok) { renderPainel(); toast(msg); } else b.disabled = false;
+  };
+}
+
+// Ações da professora sobre as contas. Devolvem true quando deu certo.
+async function aprovarContas(lista) {
+  if (Banco.ativo) {
+    try { await Banco.rpc('professor_aprovar', { p_sessao: sessaoProfessor, p_alunos: lista.map(a => a.id) }); }
+    catch (falha) { alert(mensagemErro(falha)); return false; }
+  }
+  lista.forEach(a => { a.aprovado = true; });
+  return true;
+}
+
+// Mudar a turma pelo painel também aprova a conta: quem escolheu a turma foi a professora.
+async function mudarTurmaConta(a, nova) {
+  const emUso = `Já existe uma conta com o nome ${a.nome} na turma ${nova}. Apague a conta repetida antes de mudar.`;
+  if (Banco.ativo) {
+    try { await Banco.rpc('professor_mudar_turma', { p_sessao: sessaoProfessor, p_aluno: a.id, p_turma: nova }); }
+    catch (falha) { alert(falha.codigo === 'NOME_EM_USO' ? emUso : mensagemErro(falha)); return false; }
+    a.aprovado = true;
+  } else if (Object.values(dados.alunos).some(o => o.id !== a.id && chaveConta(o.turma, o.nome) === chaveConta(nova, a.nome))) {
+    alert(emUso); return false;
+  }
+  a.turma = nova;
+  if (dados.alunos[a.id]) { dados.alunos[a.id].turma = nova; Store.salvar(dados); }
+  return true;
+}
+
+async function apagarConta(a) {
+  if (!confirm(`Apagar a conta de ${a.nome} (turma ${nomeTurma(a.turma)}) e todo o progresso? Esta ação não pode ser desfeita.`)) return false;
+  if (Banco.ativo) {
+    try { await Banco.rpc('professor_apagar_aluno', { p_sessao: sessaoProfessor, p_aluno: a.id }); }
+    catch (falha) { alert(mensagemErro(falha)); return false; }
+  }
+  delete painelDados.alunos[a.id];
+  if (dados.alunos[a.id]) { delete dados.alunos[a.id]; Store.salvar(dados); }
+  return true;
 }
 
 function renderPainel() {
+  renderPendentes();
   const lista = alunosFiltrados();
   const resumos = lista.map(resumoAluno).sort((a, b) => b.pontos - a.pontos);
   const resp = lista.flatMap(a => a.tentativas.flatMap(t => t.respostas));
@@ -984,10 +1089,12 @@ function renderPainel() {
 }
 
 function abrirHistorico(id) {
-  const a = painelDados.alunos[id];
+  const a = painelDados.alunos[id], espera = aguardandoAprovacao(a);
   abrirModal(`
     <h2>📈 Histórico de ${esc(a.nome)}</h2>
     <p>Turma ${esc(nomeTurma(a.turma))} · ${totalPontos(a)} pontos · maior sequência: ${a.maiorSequencia || 0}</p>
+    ${espera ? `<p class="aviso hist-espera">⏳ Aguardando aprovação: esta conta ainda não aparece no ranking. Conta de ${dataHora(a.criadoEm)}.</p>
+      ${turmaOficial(a.turma) ? `<button class="btn btn-primario btn-grande" id="btn-aprovar-aluno">✅ Confirmar no ${esc(nomeTurma(a.turma))}</button>` : ''}` : ''}
     <div class="tabela-rolagem">${a.tentativas.length ? `<table><thead><tr><th>Data</th><th>Fase</th><th>Acertos</th><th>Pontos</th><th>★</th></tr></thead><tbody>
       ${a.tentativas.slice().reverse().map(t => `<tr><td>${new Date(t.data).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${esc(t.fase)}</td><td>${t.acertos}/${t.total}</td><td>${t.pontos}</td><td>${t.estrelas}</td></tr>`).join('')}
       </tbody></table>` : '<p class="vazio">Nenhuma tentativa ainda.</p>'}</div>
@@ -1000,29 +1107,19 @@ function abrirHistorico(id) {
     <button class="btn btn-secundario btn-grande" id="btn-nova-senha">🔑 Criar senha nova para este estudante</button>
     <button class="btn btn-perigo btn-grande" id="btn-apagar-aluno">🗑️ Apagar esta conta</button>
     <button class="btn btn-texto" onclick="fecharModal()">Fechar</button>`);
+  if ($('#btn-aprovar-aluno')) $('#btn-aprovar-aluno').onclick = async () => {
+    if (!await aprovarContas([a])) return;
+    fecharModal(); abrirPainel(); toast(`✅ ${esc(a.nome)}: turma ${esc(nomeTurma(a.turma))} confirmada.`);
+  };
   $('#btn-apagar-aluno').onclick = async () => {
-    if (!confirm(`Apagar a conta de ${a.nome} (turma ${a.turma}) e todo o progresso? Esta ação não pode ser desfeita.`)) return;
-    if (Banco.ativo) {
-      try { await Banco.rpc('professor_apagar_aluno', { p_pin: pinProfessor, p_aluno: id }); }
-      catch (falha) { alert(mensagemErro(falha)); return; }
-    }
-    delete painelDados.alunos[id];
-    if (dados.alunos[id]) { delete dados.alunos[id]; Store.salvar(dados); }
+    if (!await apagarConta(a)) return;
     fecharModal(); abrirPainel(); toast(`🗑️ Conta de ${esc(a.nome)} apagada.`);
   };
   $('#btn-mudar-turma').onclick = async () => {
     const nova = $('#hist-turma').value;
     if (!nova || nova === turmaOficial(a.turma)) { toast(`${esc(a.nome)} já está no ${esc(nomeTurma(a.turma))}.`); return; }
-    if (!confirm(`Passar ${a.nome} para a turma ${nova}? O progresso continua o mesmo.`)) return;
-    const emUso = `Já existe uma conta com o nome ${a.nome} na turma ${nova}. Apague a conta repetida antes de mudar.`;
-    if (Banco.ativo) {
-      try { await Banco.rpc('professor_mudar_turma', { p_pin: pinProfessor, p_aluno: id, p_turma: nova }); }
-      catch (falha) { alert(falha.codigo === 'NOME_EM_USO' ? emUso : mensagemErro(falha)); return; }
-    } else if (Object.values(dados.alunos).some(o => o.id !== id && chaveConta(o.turma, o.nome) === chaveConta(nova, a.nome))) {
-      alert(emUso); return;
-    }
-    a.turma = nova;
-    if (dados.alunos[id]) { dados.alunos[id].turma = nova; Store.salvar(dados); }
+    if (!confirm(`Passar ${a.nome} para a turma ${nova}? O progresso continua o mesmo.${espera ? ' A conta também fica aprovada nessa turma.' : ''}`)) return;
+    if (!await mudarTurmaConta(a, nova)) return;
     fecharModal(); abrirPainel(); toast(`👥 ${esc(a.nome)} agora está no ${esc(nova)}.`);
   };
   $('#btn-nova-senha').onclick = async () => {
@@ -1030,7 +1127,7 @@ function abrirHistorico(id) {
     if (nova === null) return;
     if (!/^\d{4}$/.test(nova.trim())) { alert('A senha precisa ter 4 números.'); return; }
     if (Banco.ativo) {
-      try { await Banco.rpc('professor_redefinir_senha', { p_pin: pinProfessor, p_aluno: id, p_nova: nova.trim() }); }
+      try { await Banco.rpc('professor_redefinir_senha', { p_sessao: sessaoProfessor, p_aluno: id, p_nova: nova.trim() }); }
       catch (falha) { alert(mensagemErro(falha)); return; }
     } else {
       a.pin = nova.trim(); Store.salvar(dados);
@@ -1077,8 +1174,8 @@ function importarBackup(arquivo) {
     catch { alert('Arquivo inválido. Use um backup exportado por esta plataforma.'); return; }
     if (Banco.ativo) {
       try {
-        const r = await Banco.rpc('professor_importar', { p_pin: pinProfessor, p_alunos: novo.alunos });
-        painelDados = await carregarPainelOnline(pinProfessor);
+        const r = await Banco.rpc('professor_importar', { p_sessao: sessaoProfessor, p_alunos: novo.alunos });
+        painelDados = await carregarPainelOnline();
         toast(`✅ Enviado ao banco: ${r.adicionados} novos, ${r.mesclados} mesclados.`);
         abrirPainel();
       } catch (falha) { alert(mensagemErro(falha)); }
@@ -1118,22 +1215,17 @@ function iniciarPainel() {
   $('#input-importar').onchange = e => { if (e.target.files[0]) importarBackup(e.target.files[0]); e.target.value = ''; };
   $('#btn-imprimir').onclick = () => window.print();
   $('#btn-pin').onclick = () => {
+    if (Banco.ativo) { abrirTrocarSenhaProfessor(); return; }
     const novo = prompt('Novo PIN do painel (4 a 8 números):');
     if (novo === null) return;
     if (!/^\d{4,8}$/.test(novo)) { alert('O PIN deve ter de 4 a 8 números.'); return; }
-    if (Banco.ativo) {
-      Banco.rpc('professor_alterar_pin', { p_pin: pinProfessor, p_novo: novo })
-        .then(() => { pinProfessor = novo; toast('🔐 PIN alterado no banco.'); })
-        .catch(falha => alert(mensagemErro(falha)));
-      return;
-    }
     dados.config.pin = novo; Store.salvar(dados); toast('🔐 PIN alterado.');
   };
   $('#btn-apagar').onclick = async () => {
     if (Banco.ativo) {
       if (!confirm('Apagar TODOS os dados dos estudantes do BANCO DE DADOS? Isso apaga o progresso de todos os aparelhos. Faça um backup antes. Esta ação não pode ser desfeita.')) return;
       try {
-        await Banco.rpc('professor_apagar_tudo', { p_pin: pinProfessor });
+        await Banco.rpc('professor_apagar_tudo', { p_sessao: sessaoProfessor });
         painelDados = { alunos: {} };
         dados.alunos = {}; Store.salvar(dados); Store.sessao(null);
         renderPainel(); toast('Dados apagados do banco.');
@@ -1144,9 +1236,39 @@ function iniciarPainel() {
     dados.alunos = {}; Store.salvar(dados); Store.sessao(null); renderPainel(); toast('Dados apagados.');
   };
   $('#btn-sair-painel').onclick = () => {
-    pinProfessor = null;
+    sairProfessor();
     painelDados = null;
     mostrar('tela-login');
+  };
+}
+
+// A professora logada troca a própria senha.
+function abrirTrocarSenhaProfessor() {
+  abrirModal(`
+    <h2>🔐 Trocar minha senha</h2>
+    <p>Conta: <b>${esc(emailProfessor)}</b></p>
+    <form id="form-senha-prof">
+      <input type="email" value="${esc(emailProfessor)}" autocomplete="username" hidden>
+      <label class="campo">Senha atual<input type="password" id="sp-atual" autocomplete="current-password" maxlength="72" required></label>
+      <label class="campo">Nova senha (pelo menos 6 caracteres)<input type="password" id="sp-nova" autocomplete="new-password" minlength="6" maxlength="72" required></label>
+      <label class="campo">Repita a nova senha<input type="password" id="sp-nova2" autocomplete="new-password" maxlength="72" required></label>
+      <p class="erro" id="sp-erro"></p>
+      <button class="btn btn-primario btn-grande">Salvar</button>
+    </form>
+    <button class="btn btn-texto" onclick="fecharModal()">Cancelar</button>`);
+  $('#sp-atual').focus();
+  $('#form-senha-prof').onsubmit = async e => {
+    e.preventDefault();
+    const atual = $('#sp-atual').value, nova = $('#sp-nova').value;
+    if (nova.length < 6) { $('#sp-erro').textContent = mensagemErro({ codigo: 'SENHA_CURTA' }); return; }
+    if (nova !== $('#sp-nova2').value) { $('#sp-erro').textContent = 'As duas senhas novas não são iguais.'; return; }
+    const botao = $('#form-senha-prof .btn-primario');
+    botao.disabled = true; botao.textContent = 'Salvando...';
+    try {
+      await Banco.rpc('professor_trocar_senha', { p_sessao: sessaoProfessor, p_atual: atual, p_nova: nova });
+      fecharModal(); toast('🔐 Senha alterada.');
+    } catch (falha) { $('#sp-erro').textContent = mensagemErro(falha); }
+    finally { botao.disabled = false; botao.textContent = 'Salvar'; }
   };
 }
 
